@@ -1,11 +1,7 @@
 package com.limelight;
 
-import android.content.Context;
 import android.content.SharedPreferences;
-import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.view.Display;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -21,22 +17,18 @@ import androidx.preference.Preference;
 import androidx.preference.PreferenceGroup;
 import androidx.preference.PreferenceManager;
 
-import com.bytehamster.lib.preferencesearch.SearchPreferenceResult;
-import com.bytehamster.lib.preferencesearch.SearchPreferenceResultListener;
 import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.preferences.StreamSettings;
 import com.limelight.profiles.ProfilesManager;
 import com.limelight.profiles.SettingsProfile;
 import com.limelight.utils.UiHelper;
 
-import org.jcodec.containers.mp4.boxes.Edit;
-
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-public class EditProfileActivity extends AppCompatActivity implements SearchPreferenceResultListener {
+public class EditProfileActivity extends AppCompatActivity {
     private String profileUuid;
     private SettingsProfile currentProfile;
     private InMemorySharedPreferences inMemoryPrefs;
@@ -115,12 +107,6 @@ public class EditProfileActivity extends AppCompatActivity implements SearchPref
         }
 
         return super.onOptionsItemSelected(item);
-    }
-
-    @Override
-    public void onSearchResultClicked(SearchPreferenceResult result) {
-        result.closeSearchPage(this);
-        result.highlight(prefsFragment);
     }
 
     void reloadSettings() {

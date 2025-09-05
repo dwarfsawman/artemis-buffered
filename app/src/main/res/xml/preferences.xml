@@ -3,7 +3,6 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:seekbar="http://schemas.moonlight-stream.com/apk/res/seekbar"
     app:iconSpaceReserved="false">
-    <com.bytehamster.lib.preferencesearch.SearchPreference android:key="searchPreference" />
 
     <PreferenceCategory
         android:key="category_video_settings"
