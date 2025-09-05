@@ -26,7 +26,7 @@ import com.limelight.LimeLog;
 import com.limelight.preferences.PreferenceConfiguration;
 
 public class MediaCodecHelper {
-    
+
     private static final List<String> preferredDecoders;
 
     private static final List<String> blacklistedDecoderPrefixes;
@@ -40,6 +40,9 @@ public class MediaCodecHelper {
     private static final List<String> refFrameInvalidationHevcPrefixes;
     private static final List<String> useFourSlicesPrefixes;
     private static final List<String> qualcommDecoderPrefixes;
+    private static final List<String> tegraDecoderPrefixes;
+
+    private static final List<String> mtkDecoderPrefixes; //ALONSOJR1980
     private static final List<String> kirinDecoderPrefixes;
     private static final List<String> exynosDecoderPrefixes;
     private static final List<String> amlogicDecoderPrefixes;
@@ -83,7 +86,7 @@ public class MediaCodecHelper {
     static {
         preferredDecoders = new LinkedList<>();
     }
-    
+
     static {
         blacklistedDecoderPrefixes = new LinkedList<>();
 
@@ -107,7 +110,7 @@ public class MediaCodecHelper {
         blacklistedDecoderPrefixes.add("OMX.qcom.video.decoder.hevcswvdec");
         blacklistedDecoderPrefixes.add("OMX.SEC.hevc.sw.dec");
     }
-    
+
     static {
         // If a decoder qualifies for reference frame invalidation,
         // these entries will be ignored for those decoders.
@@ -228,6 +231,22 @@ public class MediaCodecHelper {
 
         qualcommDecoderPrefixes.add("omx.qcom");
         qualcommDecoderPrefixes.add("c2.qti");
+        qualcommDecoderPrefixes.add("c2.qcom");
+    }
+
+    static {
+        tegraDecoderPrefixes = new LinkedList<>();
+
+        tegraDecoderPrefixes.add("omx.nvidia");
+        tegraDecoderPrefixes.add("c2.nvidia");
+    }
+
+    //ALONSOJR1980
+    static {
+        mtkDecoderPrefixes = new LinkedList<>();
+
+        mtkDecoderPrefixes.add("omx.mtk");
+        mtkDecoderPrefixes.add("c2.mtk");
     }
 
     static {
@@ -250,6 +269,16 @@ public class MediaCodecHelper {
         amlogicDecoderPrefixes.add("omx.amlogic");
         amlogicDecoderPrefixes.add("c2.amlogic"); // Unconfirmed
     }
+
+    //derflacco
+    public static boolean isNvidiaDecoder(String decoderName) {
+        return isDecoderInList(tegraDecoderPrefixes, decoderName);
+    }
+
+    public static boolean isQualcommDecoder(String decoderName) {
+        return isDecoderInList(qualcommDecoderPrefixes, decoderName);
+    }
+
 
     private static boolean isPowerVR(String glRenderer) {
         return glRenderer.toLowerCase().contains("powervr");
@@ -372,6 +401,12 @@ public class MediaCodecHelper {
                 refFrameInvalidationHevcPrefixes.add("omx.qcom");
                 refFrameInvalidationAvcPrefixes.add("c2.qti");
                 refFrameInvalidationHevcPrefixes.add("c2.qti");
+
+                refFrameInvalidationAvcPrefixes.add("c2.mtk"); //derflacco
+                refFrameInvalidationHevcPrefixes.add("c2.mtk"); //derflacco
+                refFrameInvalidationAvcPrefixes.add("omx.mtk"); //derflacco
+                refFrameInvalidationHevcPrefixes.add("omx.mtk"); //derflacco
+                refFrameInvalidationHevcPrefixes.add("c2.qcom"); //derflacco
             }
 
             // Qualcomm's early HEVC decoders break hard on our HEVC stream. The best check to
@@ -428,7 +463,7 @@ public class MediaCodecHelper {
                 }
             }
         }
-        
+
         return false;
     }
 
@@ -488,8 +523,11 @@ public class MediaCodecHelper {
         // NB: Even on Android 10, this optimization still provides significant
         // performance gains on Pixel 2.
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                isDecoderInList(qualcommDecoderPrefixes, decoderName) &&
-                !isAdreno620;
+                (
+                        isDecoderInList(qualcommDecoderPrefixes, decoderName)
+                                || isDecoderInList(refFrameInvalidationHevcPrefixes, decoderName) ||
+                                isDecoderInList(refFrameInvalidationAvcPrefixes,  decoderName)
+                ) && !isAdreno620;
     }
 
     public static boolean setDecoderLowLatencyOptions(MediaFormat videoFormat, MediaCodecInfo decoderInfo, boolean ultraLowLatency, int tryNumber) {
@@ -498,6 +536,15 @@ public class MediaCodecHelper {
 
         boolean setNewOption = false;
 
+//derflacco
+        // NVIDIA Tegra extra low-latency toggles
+        if (isNvidiaDecoder(decoderInfo.getName())) {
+            safeSet(videoFormat, "media.low-latency.enable", 1);
+            safeSet(videoFormat, "vendor.low-latency.enable", 1);
+            safeSet(videoFormat, "disable-output-reorder", 1);
+            safeSet(videoFormat, "vendor.nvidia.disable-output-reorder", 1);
+            setNewOption = true;
+        }
         if (tryNumber < 1) {
             // Official Android 11+ low latency option (KEY_LOW_LATENCY).
             videoFormat.setInteger("low-latency", 1);
@@ -559,7 +606,10 @@ public class MediaCodecHelper {
                 //
                 // We will first try both, then try vendor.qti-ext-dec-low-latency.enable alone if that fails
                 if (tryNumber < 4) {
-                    videoFormat.setInteger("vendor.qti-ext-dec-picture-order.enable", 1);
+                    // Adjust picture-order flag: 0 for OMX.qcom (disable reordering), 1 for C2.*
+                    boolean __isOmxQcom = decoderInfo.getName() != null &&
+                            decoderInfo.getName().toLowerCase(java.util.Locale.US).startsWith("omx.qcom");
+                    safeSet(videoFormat, "vendor.qti-ext-dec-picture-order.enable", __isOmxQcom ? 0 : 1);
                     setNewOption = true;
                 }
                 if (tryNumber < 5) {
@@ -575,6 +625,53 @@ public class MediaCodecHelper {
                     setNewOption = true;
                 }
             }
+            // ALONSOJR1980
+//            else if (isDecoderInList(mtkDecoderPrefixes, decoderInfo.getName())) {
+//                if (tryNumber < 4) {
+//
+//                    videoFormat.setInteger("vendor.mtk.vdec.cpu.boost.mode.value", 2);
+//                    videoFormat.setInteger("vendor.mtk.ext.dolby.vision.cpu-boost", 1);
+//                    videoFormat.setInteger("vendor.mtk.vdec.bq.guard.interval.time.value", 2);
+//                    videoFormat.setInteger("vendor.mtk.vdec.buffer.fetch.timeout.ms.value", 2);
+            else if (isDecoderInList(mtkDecoderPrefixes, decoderInfo.getName())) {
+                if (tryNumber < 4) {
+                    // --- PRESET: MTK Low-Latency (safe & balanced, no duplicates) ---
+
+                    // Boost/DVFS: moderate profile
+                    safeSet(videoFormat, "vdec-lowlatency", 1);
+                    safeSet(videoFormat, "vendor.mtk.vdec.cpu.boost.mode", 1);
+                    safeSet(videoFormat, "vendor.mtk.vdec.cpu.boost.mode.value", 1);
+                    safeSet(videoFormat, "vendor.mtk.vdec.dvfs.mode", 1);
+                    safeSet(videoFormat, "vendor.mtk.vdec.dvfs.level", 1);
+
+                    // Pipeline / code path
+                    safeSet(videoFormat, "vendor.mtk.vdec.low-latency.mode", 1);    // Enable low-latency path
+                    safeSet(videoFormat, "vendor.mtk.vdec.ultra-low-latency", 0);   // ULL off for stability
+                    safeSet(videoFormat, "vendor.mtk.vdec.disable-idle", 1);        // Prevent clock downscaling
+                    safeSet(videoFormat, "vendor.mtk.vdec.preload.frame.count", 1); // Light prebuffering
+
+                    // Queue / timeouts (moderate)
+                    safeSet(videoFormat, "vendor.mtk.vdec.buffer.fetch.timeout.ms", 4);
+                    safeSet(videoFormat, "vendor.mtk.vdec.bq.guard.interval.time", 4);
+                    safeSet(videoFormat, "vendor.mtk.vdec.input.max.queue.depth", 3);
+                    safeSet(videoFormat, "vendor.mtk.vdec.output.max.queue.depth", 3);
+
+                    // Pacing: controlled by the app
+                    safeSet(videoFormat, "vendor.mtk.vdec.vsync.adjust.enable", 0);
+
+                    // Skip/drop: only NVOP
+                    safeSet(videoFormat, "vendor.mtk.vdec.nvop.skip", 1);
+                    safeSet(videoFormat, "vendor.mtk.vdec.skip.mode", 0);
+                    safeSet(videoFormat, "vendor.mtk.vdec.drop.nonref.frame", 0);
+                    safeSet(videoFormat, "vendor.mtk.vdec.frame-drop.policy", 0);
+
+                    // Standard Android hints
+                    safeSet(videoFormat, MediaFormat.KEY_OPERATING_RATE, (int) Short.MAX_VALUE);
+                    safeSet(videoFormat, MediaFormat.KEY_PRIORITY, 0);
+                }
+                setNewOption = true;
+            }
+
             else if (isDecoderInList(kirinDecoderPrefixes, decoderInfo.getName())) {
                 if (tryNumber < 4) {
                     // Kirin low latency options
@@ -649,7 +746,7 @@ public class MediaCodecHelper {
     public static boolean decoderCanDirectSubmit(String decoderName) {
         return isDecoderInList(directSubmitPrefixes, decoderName) && !isExynos4Device();
     }
-    
+
     public static boolean decoderNeedsSpsBitstreamRestrictions(String decoderName) {
         return isDecoderInList(spsFixupBitstreamFixupDecoderPrefixes, decoderName);
     }
@@ -787,7 +884,7 @@ public class MediaCodecHelper {
 
         return infoList;
     }
-    
+
     @SuppressWarnings("RedundantThrows")
     public static String dumpDecoders() throws Exception {
         String str = "";
@@ -796,12 +893,12 @@ public class MediaCodecHelper {
             if (codecInfo.isEncoder()) {
                 continue;
             }
-            
+
             str += "Decoder: "+codecInfo.getName()+"\n";
             for (String type : codecInfo.getSupportedTypes()) {
                 str += "\t"+type+"\n";
                 CodecCapabilities caps = codecInfo.getCapabilitiesForType(type);
-                
+
                 for (CodecProfileLevel profile : caps.profileLevels) {
                     str += "\t\t"+profile.profile+" "+profile.level+"\n";
                 }
@@ -809,7 +906,7 @@ public class MediaCodecHelper {
         }
         return str;
     }
-    
+
     private static MediaCodecInfo findPreferredDecoder() {
         // This is a different algorithm than the other findXXXDecoder functions,
         // because we want to evaluate the decoders in our list's order
@@ -818,14 +915,14 @@ public class MediaCodecHelper {
         if (!initialized) {
             throw new IllegalStateException("MediaCodecHelper must be initialized before use");
         }
-        
+
         for (String preferredDecoder : preferredDecoders) {
             for (MediaCodecInfo codecInfo : getMediaCodecList()) {
                 // Skip encoders
                 if (codecInfo.isEncoder()) {
                     continue;
                 }
-                
+
                 // Check for preferred decoders
                 if (preferredDecoder.equalsIgnoreCase(codecInfo.getName())) {
                     LimeLog.info("Preferred decoder choice is "+codecInfo.getName());
@@ -833,7 +930,7 @@ public class MediaCodecHelper {
                 }
             }
         }
-        
+
         return null;
     }
 
@@ -854,7 +951,7 @@ public class MediaCodecHelper {
 
         return false;
     }
-    
+
     public static MediaCodecInfo findFirstDecoder(String mimeType) {
         for (MediaCodecInfo codecInfo : getMediaCodecList()) {
             // Skip encoders
@@ -868,7 +965,7 @@ public class MediaCodecHelper {
                     continue;
                 }
             }
-            
+
             // Find a decoder that supports the specified video format
             for (String mime : codecInfo.getSupportedTypes()) {
                 if (mime.equalsIgnoreCase(mimeType)) {
@@ -882,17 +979,17 @@ public class MediaCodecHelper {
                 }
             }
         }
-        
+
         return null;
     }
-    
+
     public static MediaCodecInfo findProbableSafeDecoder(String mimeType, int requiredProfile) {
         // First look for a preferred decoder by name
         MediaCodecInfo info = findPreferredDecoder();
         if (info != null) {
             return info;
         }
-        
+
         // Now look for decoders we know are safe
         try {
             // If this function completes, it will determine if the decoder is safe
@@ -965,10 +1062,10 @@ public class MediaCodecHelper {
                 }
             }
         }
-        
+
         return null;
     }
-    
+
     public static String readCpuinfo() throws Exception {
         StringBuilder cpuInfo = new StringBuilder();
         try (final BufferedReader br = new BufferedReader(new FileReader(new File("/proc/cpuinfo")))) {
@@ -982,22 +1079,22 @@ public class MediaCodecHelper {
             return cpuInfo.toString();
         }
     }
-    
+
     private static boolean stringContainsIgnoreCase(String string, String substring) {
         return string.toLowerCase(Locale.ENGLISH).contains(substring.toLowerCase(Locale.ENGLISH));
     }
-    
+
     public static boolean isExynos4Device() {
         try {
             // Try reading CPU info too look for 
             String cpuInfo = readCpuinfo();
-            
+
             // SMDK4xxx is Exynos 4 
             if (stringContainsIgnoreCase(cpuInfo, "SMDK4")) {
                 LimeLog.info("Found SMDK4 in /proc/cpuinfo");
                 return true;
             }
-            
+
             // If we see "Exynos 4" also we'll count it
             if (stringContainsIgnoreCase(cpuInfo, "Exynos 4")) {
                 LimeLog.info("Found Exynos 4 in /proc/cpuinfo");
@@ -1006,7 +1103,7 @@ public class MediaCodecHelper {
         } catch (Exception e) {
             e.printStackTrace();
         }
-        
+
         try {
             File systemDir = new File("/sys/devices/system");
             File[] files = systemDir.listFiles();
@@ -1021,7 +1118,78 @@ public class MediaCodecHelper {
         } catch (Exception e) {
             e.printStackTrace();
         }
-        
+
         return false;
     }
+
+
+    // --- Helpers to safely set vendor-specific flags without crashing ---
+
+    private static void safeSet(MediaFormat format, String key, int value) {
+        try {
+            format.setInteger(key, value);
+        } catch (Throwable ignored) {
+            // key not supported, ignore
+        }
+    }
+
+    private static void safeSet(MediaFormat format, String key, boolean value) {
+        try {
+            format.setInteger(key, value ? 1 : 0);
+        } catch (Throwable ignored) {
+            // key not supported, ignore
+        }
+    }
+
+    private static void safeSet(MediaFormat format, String key, long value) {
+        try {
+            format.setLong(key, value);
+        } catch (Throwable ignored) {
+            // key not supported, ignore
+        }
+    }
+
+    private static void safeSet(MediaFormat format, String key, String value) {
+        try {
+            format.setString(key, value);
+        } catch (Throwable ignored) {
+            // key not supported, ignore
+        }
+    }
+
+    //derflacco
+    public static void applyExtraVendorOptions(MediaFormat videoFormat, String decoderName) {
+        if (videoFormat == null || decoderName == null) return;
+        // NVIDIA Tegra (Shield TV): enable generic low-latency + disable frame reordering
+        if (isNvidiaDecoder(decoderName)) {
+            safeSet(videoFormat, "media.low-latency.enable", 1);
+            safeSet(videoFormat, "vendor.low-latency.enable", 1); // fallback generic vendor key
+            safeSet(videoFormat, "disable-output-reorder", 1);
+            safeSet(videoFormat, "vendor.nvidia.disable-output-reorder", 1); // in case vendor namespace is required
+        }
+        // Qualcomm: ensure vendor low latency and frame-order tweaks
+        if (isQualcommDecoder(decoderName)) {
+            safeSet(videoFormat, "vendor.qti-ext-dec-low-latency.enable", 1);
+            safeSet(videoFormat, "vendor.qti-ext-dec-picture-order.enable", 0);
+            safeSet(videoFormat, "vendor.qti-ext-dec-frame-drop.enable", 1);
+        }
+
+        // Legacy Qualcomm OMX decoders: apply vendor keys + AOSP knobs
+        if (decoderName != null && decoderName.toLowerCase(java.util.Locale.US).startsWith("omx.qcom")) {
+            // Low latency & reordering off
+            safeSet(videoFormat, "vendor.qti-ext-dec-low-latency.enable", 1);
+            safeSet(videoFormat, "vendor.qti-ext-dec-picture-order.enable", 0);
+            safeSet(videoFormat, "vendor.qti-ext-dec-frame-drop.enable", 1);
+            // Reduce DPB output delay on older OMX stacks
+            safeSet(videoFormat, "vendor.qti-ext-dec-dpb-output-delay.enable", 0);
+            // Prefer IDR when possible
+            safeSet(videoFormat, "vendor.qti-ext-dec-picture-type.enable", 0); //ignored in logs
+            // Generic AOSP scheduling hints
+            try { videoFormat.setInteger(android.media.MediaFormat.KEY_OPERATING_RATE, (int)Short.MAX_VALUE); } catch (Throwable ignored) {}
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                try { videoFormat.setInteger(android.media.MediaFormat.KEY_PRIORITY, 0); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
 }

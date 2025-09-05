@@ -134,6 +134,8 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import android.view.SurfaceView;
+import android.view.ViewGroup;
 
 
 public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
@@ -166,7 +168,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private static final int FOUR_FINGER_TAP_THRESHOLD = 300;
     private static final int FIVE_FINGER_TAP_THRESHOLD = 300;
 
-    private final Handler timerHandler = new Handler(Looper.getMainLooper());
+    private Handler timerHandler;
 
     private ControllerHandler controllerHandler;
     private KeyboardTranslator keyboardTranslator;
@@ -229,6 +231,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private TextView performanceOverlayLite;
 
     private TextView performanceOverlayBig;
+    private com.github.mikephil.charting.charts.LineChart perfChartLatency;
+    private com.github.mikephil.charting.charts.LineChart perfChartDecode;
+    private com.github.mikephil.charting.charts.LineChart perfChartFps;
 
     private MediaCodecDecoderRenderer decoderRenderer;
     private boolean reportedCrash;
@@ -330,12 +335,22 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
     };
 
+    private final Runnable backgroundPing = () -> {
+        if (connected) {
+            timerHandler.postDelayed(Game.this.backgroundPing, 20);
+            MoonBridge.sendEmptyPayload();
+        }
+    };
+
     @SuppressLint({"MissingInflatedId", "ClickableViewAccessibility"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        normalizeChartsOverlayPrefs();
+
         super.onCreate(savedInstanceState);
 
         instance = this;
+        timerHandler = new Handler(Looper.getMainLooper());
 
         UiHelper.setLocale(this);
 
@@ -506,6 +521,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         performanceOverlayLite = findViewById(R.id.performanceOverlayLite);
 
         performanceOverlayBig = findViewById(R.id.performanceOverlayBig);
+        // Charts
+        try {
+            perfChartLatency = findViewById(R.id.perfChartLatency);
+            perfChartDecode  = findViewById(R.id.perfChartDecode);
+            perfChartFps     = findViewById(R.id.perfChartFps);
+        } catch (Throwable ignored) {}
+
 
         inputCaptureProvider = InputCaptureManager.getInputCaptureProvider(this, this);
 
@@ -615,8 +637,30 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         // Check if the user has enabled performance stats overlay
-        if (prefConfig.enablePerfOverlay) {
+        if (prefConfig.enablePerfOverlay || prefConfig.enablePerfCharts) {
             performanceOverlayView.setVisibility(View.VISIBLE);
+
+
+// Charts visibility (force)
+            if (prefConfig.enablePerfCharts || prefConfig.perfChartLatency || prefConfig.perfChartDecode || prefConfig.perfChartFps) {
+                if (perfChartLatency != null) perfChartLatency.setVisibility(prefConfig.perfChartLatency ? View.VISIBLE : View.GONE);
+                if (perfChartDecode  != null) perfChartDecode.setVisibility(prefConfig.perfChartDecode  ? View.VISIBLE : View.GONE);
+                if (perfChartFps     != null) perfChartFps.setVisibility(prefConfig.perfChartFps      ? View.VISIBLE : View.GONE);
+            } else {
+                if (perfChartLatency != null) perfChartLatency.setVisibility(View.GONE);
+                if (perfChartDecode  != null) perfChartDecode.setVisibility(View.GONE);
+                if (perfChartFps     != null) perfChartFps.setVisibility(View.GONE);
+            }
+// Charts visibility
+            if (prefConfig.enablePerfCharts) {
+                if (perfChartLatency != null) perfChartLatency.setVisibility(prefConfig.perfChartLatency ? View.VISIBLE : View.GONE);
+                if (perfChartDecode  != null) perfChartDecode.setVisibility(prefConfig.perfChartDecode  ? View.VISIBLE : View.GONE);
+                if (perfChartFps     != null) perfChartFps.setVisibility(prefConfig.perfChartFps      ? View.VISIBLE : View.GONE);
+            } else {
+                if (perfChartLatency != null) perfChartLatency.setVisibility(View.GONE);
+                if (perfChartDecode  != null) perfChartDecode.setVisibility(View.GONE);
+                if (perfChartFps     != null) perfChartFps.setVisibility(View.GONE);
+            }
             if (prefConfig.enablePerfOverlayLite) {
                 performanceOverlayLite.setVisibility(View.VISIBLE);
                 if(prefConfig.enablePerfOverlayLiteDialog){
@@ -654,12 +698,45 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 glPrefs.glRenderer,
                 this);
 
-        // Don't stream HDR if the decoder can't support it
+// --- Force tight thresholds (prefConfig.forceTightThresholds) ---
+        try {
+            boolean forceTight = false;
+            if (prefConfig != null) {
+                try {
+                    java.lang.reflect.Field f = prefConfig.getClass().getDeclaredField("forceTightThresholds");
+                    f.setAccessible(true);
+                    Object v = f.get(prefConfig);
+                    if (v instanceof Boolean) forceTight = (Boolean) v;
+                } catch (Throwable ignored) {}
+            }
+            try { decoderRenderer.setForceTightThresholds(forceTight); } catch (Throwable ignored) {}
+            if (forceTight) {
+                LimeLog.info("ForceTightThresholds enabled: using vsync-based thresholds on all devices");
+            }
+        } catch (Throwable ignored) {}
+
+// --- latency profile selection ---
+        try {
+            if (prefConfig != null && prefConfig.preferLowerDelays) {
+                // Intermediate: more responsive than Balanced but not 0 µs
+                decoderRenderer.setPreferLowerDelays(true);
+                decoderRenderer.setPreferLowerDelaysTimeoutUs(500);  // 0.5 ms
+                prefConfig.framePacing = PreferenceConfiguration.FRAME_PACING_BALANCED;
+                LimeLog.info("PreferLowerDelays: preferLowerDelays=true, timeout=500us, pacing=BALANCED");
+            } else {
+                // Balanced default
+                decoderRenderer.setPreferLowerDelays(false);
+                decoderRenderer.setPreferLowerDelaysTimeoutUs(2000); // 2 ms
+                prefConfig.framePacing = PreferenceConfiguration.FRAME_PACING_BALANCED;
+                LimeLog.info("Balanced: preferLowerDelays=false, timeout=2000us, pacing=BALANCED");
+            }
+        } catch (Throwable ignored) {}
+
+// Don't stream HDR if the decoder can't support it
         if (willStreamHdr && !decoderRenderer.isHevcMain10Hdr10Supported() && !decoderRenderer.isAv1Main10Supported()) {
             willStreamHdr = false;
             Toast.makeText(this, "Decoder does not support HDR10 profile", Toast.LENGTH_LONG).show();
         }
-
         // Display a message to the user if HEVC was forced on but we still didn't find a decoder
         if (prefConfig.videoFormat == PreferenceConfiguration.FormatOption.FORCE_HEVC && !decoderRenderer.isHevcSupported()) {
             Toast.makeText(this, "No HEVC decoder found", Toast.LENGTH_LONG).show();
@@ -837,6 +914,52 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         overlayToggleButton = findViewById(R.id.overlayToggleZoomButton);
         setupOverlayToggleButton();
+
+        //fixed size + pacing without back-pressure on MTK
+        try {
+            View root = findViewById(android.R.id.content);
+            // Niente getIdentifier: troviamo la prima SurfaceView nel layout
+            SurfaceView streamSurfaceView = findFirstSurfaceViewFrom(root);
+
+            if (streamSurfaceView != null) {
+                // Avoid resizes/glitches that break the compositor
+                int vw = (prefConfig != null && prefConfig.width > 0) ? prefConfig.width : displayWidth;
+                int vh = (prefConfig != null && prefConfig.height > 0) ? prefConfig.height : displayHeight;
+                try { streamSurfaceView.getHolder().setFixedSize(vw, vh); } catch (Throwable ignored) {}
+                try { streamSurfaceView.setZOrderOnTop(false); } catch (Throwable ignored) {}
+                try { streamSurfaceView.setZOrderMediaOverlay(false); } catch (Throwable ignored) {}
+
+                // 2) setFrameRate via reflection (compat < 30)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    float displayHz = 60f;
+                    try {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                            displayHz = currentDisplay.getMode().getRefreshRate();
+                        } else {
+                            displayHz = currentDisplay.getRefreshRate();
+                        }
+                    } catch (Throwable ignored) {}
+
+                    float targetFps = (prefConfig != null && prefConfig.fps > 0) ? prefConfig.fps : displayHz;
+
+                    boolean isMTKDevice;
+                    try {
+                        String sum = (android.os.Build.MANUFACTURER + " " + android.os.Build.HARDWARE + " " + android.os.Build.BOARD)
+                                .toLowerCase(java.util.Locale.US);
+                        isMTKDevice = sum.contains("mtk") || sum.contains("mediatek");
+                    } catch (Throwable t) { isMTKDevice = false; }
+
+                    int compat = isMTKDevice
+                            ? Surface.FRAME_RATE_COMPATIBILITY_DEFAULT
+                            : Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE;
+
+                    try {
+                        java.lang.reflect.Method m = SurfaceView.class.getMethod("setFrameRate", float.class, int.class);
+                        m.invoke(streamSurfaceView, Math.min(targetFps, displayHz), compat);
+                    } catch (Throwable ignored) {}
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -907,7 +1030,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (overlayToggleButton != null) {
             // Change background based on pan/zoom mode state
             overlayToggleButton.setBackgroundResource(isPanZoomMode ?
-                R.drawable.floating_menu_button_active : R.drawable.floating_menu_button);
+                    R.drawable.floating_menu_button_active : R.drawable.floating_menu_button);
             // No need for alpha changes since the color indicates the state
             overlayToggleButton.setAlpha(1.0f);
         }
@@ -1174,7 +1297,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                     keyBoardLayoutController.show();
                 }
 
-                if (prefConfig.enablePerfOverlay) {
+                if (prefConfig.enablePerfOverlay || prefConfig.enablePerfCharts || (prefConfig.perfChartLatency || prefConfig.perfChartDecode || prefConfig.perfChartFps)) {
                     performanceOverlayView.setVisibility(View.VISIBLE);
                 }
 
@@ -1236,7 +1359,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     public void updatePipAutoEnter() {
-        if (!prefConfig.enablePip) {
+        if (!prefConfig.enablePip || isOnExternalDisplay()) {
             return;
         }
 
@@ -1281,7 +1404,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // PiP is only supported on Oreo and later, and we don't need to manually enter PiP on
         // Android S and later. On Android R, we will use onPictureInPictureRequested() instead.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            if (autoEnterPip) {
+            if (autoEnterPip && !isOnExternalDisplay()) {
                 try {
                     // This has thrown all sorts of weird exceptions on Samsung devices
                     // running Oreo. Just eat them and close gracefully on leave, rather
@@ -1534,7 +1657,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         if (getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEVISION) ||
                 getPackageManager().hasSystemFeature(PackageManager.FEATURE_LEANBACK)
-            || isOnExternalDisplay()) {// TVs may take a few moments to switch refresh rates, and we can probably assume
+                || isOnExternalDisplay()) {// TVs may take a few moments to switch refresh rates, and we can probably assume
             // it will be eventually activated.
             // external displays cant be compared with displaymanager currents display refreshrate
             // TODO: Improve this
@@ -2792,11 +2915,11 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                         // Press & Hold / Double-Tap & Hold for Selection or Drag & Drop
                         double positionDelta = Math.sqrt(
                                 Math.pow(event.getX() - lastTouchDownX, 2) +
-                                Math.pow(event.getY() - lastTouchDownY, 2)
+                                        Math.pow(event.getY() - lastTouchDownY, 2)
                         );
 
                         if (synthClickPending &&
-                            event.getEventTime() - synthTouchDownTime >= prefConfig.trackpadDragDropThreshold) {
+                                event.getEventTime() - synthTouchDownTime >= prefConfig.trackpadDragDropThreshold) {
                             if (positionDelta > 50) {
                                 pendingDrag = false;
                             } else if (pendingDrag) {
@@ -3560,16 +3683,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                     }
                 }, 500);
 
-                if (prefConfig.preventPacketLoss) {
-                    Runnable mousePing = () -> {
-                        if (connected) {
-                            MoonBridge.sendEmptyPayload();
-                            timerHandler.postDelayed(this, 20);
-                        }
-                    };
-                    mousePing.run();
-                }
-
                 // Keep the display on
                 getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
@@ -3583,6 +3696,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 setupOverlayToggleButton();
 
                 hideSystemUi(1000);
+
+                if (prefConfig.preventPacketLoss) {
+                    timerHandler.postDelayed(backgroundPing, 1000);
+                }
             }
         });
 
@@ -3825,6 +3942,62 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
+
+                /*__CHART_FEED__*/
+                try {
+                    if (prefConfig != null && (prefConfig.enablePerfCharts || prefConfig.perfChartLatency || prefConfig.perfChartDecode || prefConfig.perfChartFps)) {
+                        String t = text;
+                        java.util.regex.Matcher m;
+                        // Latency (prefer labeled)
+                        Float __lat = null;
+                        m = java.util.regex.Pattern.compile("Average network latency:\\s*(\\d+)\\s*ms").matcher(t);
+                        if (m.find()) { __lat = Float.parseFloat(m.group(1).replace(',', '.')); }
+                        if (__lat == null) {
+                            m = java.util.regex.Pattern.compile("\\b(\\d{1,4})\\s*ms\\b").matcher(t);
+                            if (m.find()) { __lat = Float.parseFloat(m.group(1).replace(',', '.')); }
+                        }
+                        if (__lat != null && prefConfig.perfChartLatency && perfChartLatency != null) {
+                            Game.this.addChartPoint(perfChartLatency, __lat);
+                        }
+
+                        // Decode (prefer labeled)
+                        Float __dec = null;
+                        m = java.util.regex.Pattern.compile("Average decoding time:\\s*([0-9]+(?:[\\.,][0-9]+)?)\\s*ms").matcher(t);
+                        if (m.find()) { __dec = Float.parseFloat(m.group(1).replace(',', '.')); }
+
+
+                        if (__dec == null) {
+                            // Lite overlay pattern: "<latency>ms / <decode>ms"
+                            try {
+                                java.util.regex.Matcher mm = java.util.regex.Pattern
+                                        .compile("(\\d{1,4})\\s*ms\\s*/\\s*([0-9]+(?:[\\.,][0-9]+)?)\\s*ms")
+                                        .matcher(t);
+                                if (mm.find()) {
+                                    __dec = Float.parseFloat(mm.group(2).replace(',', '.'));
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+
+
+                        if (__dec != null && prefConfig.perfChartDecode && perfChartDecode != null) {
+                            Game.this.addChartPoint(perfChartDecode, __dec);
+                        }
+
+                        // FPS (prefer rendered FPS label)
+                        Float __fps = null;
+                        m = java.util.regex.Pattern.compile("Rendering frame rate:\\s*([0-9]+(?:\\.[0-9]+)?)\\s*FPS").matcher(t);
+                        if (m.find()) { __fps = Float.parseFloat(m.group(1).replace(',', '.')); }
+                        if (__fps == null) {
+                            m = java.util.regex.Pattern.compile("FPS[：: ]\\s*([0-9]+(?:\\.[0-9]+)?)").matcher(t);
+                            if (m.find()) { __fps = Float.parseFloat(m.group(1).replace(',', '.')); }
+                        }
+                        if (__fps != null && prefConfig.perfChartFps && perfChartFps != null) {
+                            Game.this.addChartPoint(perfChartFps, __fps);
+                        }
+                    }
+                } catch (Throwable ignored) {}
+                /*__CHART_FEED_END__*/
+
                 if(prefConfig.enablePerfOverlayLite){
                     performanceOverlayLite.setText(text);
                 }else{
@@ -4046,9 +4219,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private void applyMouseMode(int mode) {
         switch (mode) {
             case 0: // Multi-touch
-            prefConfig.enableMultiTouchScreen = true;
-            prefConfig.touchscreenTrackpad = false;
-            break;
+                prefConfig.enableMultiTouchScreen = true;
+                prefConfig.touchscreenTrackpad = false;
+                break;
             case 1: // Normal mouse
             case 5: // Normal mouse with swapped buttons
                 prefConfig.enableMultiTouchScreen = false;
@@ -4225,4 +4398,90 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             commitTextHandler.post(flushCommitTextQueue);
         }
     }
+
+    /** Helper ricorsivo per trovare la prima SurfaceView nel layout corrente */
+    private SurfaceView findFirstSurfaceViewFrom(View v) {
+        if (v instanceof SurfaceView) return (SurfaceView) v;
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                SurfaceView found = findFirstSurfaceViewFrom(g.getChildAt(i));
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+
+
+    // --- Chart helper: push a point and keep a sliding window ---
+    private void addChartPoint(com.github.mikephil.charting.charts.LineChart chart, float y) {
+        if (chart == null) return;
+        try {
+            if (chart.getData() == null) {
+                chart.setData(new com.github.mikephil.charting.data.LineData());
+            }
+            com.github.mikephil.charting.data.LineData data = chart.getData();
+            com.github.mikephil.charting.interfaces.datasets.ILineDataSet set = data.getDataSetByIndex(0);
+            if (set == null) {
+                com.github.mikephil.charting.data.LineDataSet s =
+                        new com.github.mikephil.charting.data.LineDataSet(
+                                new java.util.ArrayList<>(), null);
+                s.setDrawCircles(false);
+                s.setDrawValues(false);
+                s.setLineWidth(1.1f);
+                data.addDataSet(s);
+                set = s;
+            }
+            data.addEntry(new com.github.mikephil.charting.data.Entry(set.getEntryCount(), y), 0);
+            data.notifyDataChanged();
+            chart.notifyDataSetChanged();
+            chart.setVisibleXRangeMaximum(240); // ~4s @60fps
+            chart.moveViewToX(data.getEntryCount());
+            chart.invalidate();
+        } catch (Throwable ignored) {}
+    }
+
+
+    // Ensure Charts & Overlay Lite invariants:
+    // - If Charts is enabled but Overlay Lite is off, auto-enable Overlay + Overlay Lite.
+    // - If Overlay Lite is turned off, auto-disable Charts.
+    private void normalizeChartsOverlayPrefs() {
+        try {
+            android.content.SharedPreferences prefs =
+                    androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
+            boolean charts = prefs.getBoolean("checkbox_enable_perf_charts", false);
+            boolean overlay = prefs.getBoolean("checkbox_enable_perf_overlay", false);
+            boolean overlayLite = prefs.getBoolean("checkbox_enable_perf_overlay_lite", false);
+
+            android.content.SharedPreferences.Editor e = null;
+
+            if (charts && !overlayLite) {
+                if (e == null) e = prefs.edit();
+                e.putBoolean("checkbox_enable_perf_overlay", true);
+                e.putBoolean("checkbox_enable_perf_overlay_lite", true);
+                overlay = true;
+                overlayLite = true;
+            }
+
+            if (!overlayLite && charts) {
+                if (e == null) e = prefs.edit();
+                e.putBoolean("checkbox_enable_perf_charts", false);
+                charts = false;
+            }
+
+            if (e != null) e.apply();
+
+            // Reflect to in-memory config if present
+            try {
+                if (prefConfig != null) {
+                    prefConfig.enablePerfCharts = charts;
+                    prefConfig.enablePerfOverlay = overlay;
+                    prefConfig.enablePerfOverlayLite = overlayLite;
+                }
+            } catch (Throwable ignored) {}
+
+        } catch (Throwable ignored) {}
+    }
+
 }

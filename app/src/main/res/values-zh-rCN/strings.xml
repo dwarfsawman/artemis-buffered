@@ -683,4 +683,28 @@
     <string name="profile_manager_active_profile">当前配置：%s</string>
     <string name="rename">重命名</string>
     <string name="save">保存</string>
+
+    <!-- Performance Charts and Monitor -->
+    <string name="category_perf_charts">性能图表</string>
+    <string name="desc_chart_latency">网络延迟图表</string>
+    <string name="desc_chart_decode">解码时间图表</string>
+    <string name="desc_chart_fps">帧率图表</string>
+    <string name="title_enable_perf_charts">启用性能图表</string>
+    <string name="summary_enable_perf_charts">在游戏内性能叠加中显示时间序列图表</string>
+    <string name="title_perf_chart_latency">图表：网络延迟</string>
+    <string name="summary_perf_chart_latency">绘制平均网络延迟（毫秒）</string>
+    <string name="title_perf_chart_decode">图表：解码时间</string>
+    <string name="summary_perf_chart_decode">绘制每帧视频解码时间（毫秒）</string>
+    <string name="title_perf_chart_fps">图表：FPS</string>
+    <string name="summary_perf_chart_fps">绘制接收/渲染的每秒帧数</string>
+    <string name="category_perf_monitor_settings">性能监视器</string>
+
+    <!-- Low-latency frame balance (LFR) -->
+    <string name="title_low_latency_frame_balance">低延迟队列（实验性）</string>
+    <string name="summary_low_latency_frame_balance">通过丢弃缓冲帧以最小化延迟。</string>
+
+    <!-- Tight Vsync -->
+    <string name="title_checkbox_forceTightThresholds">紧凑 VSync（实验性）</string>
+    <string name="summary_checkbox_forceTightThresholds">更紧凑的 VSync 阈值以降低延迟；可能增加丢帧。</string>
+
 </resources>
