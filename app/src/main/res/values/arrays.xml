@@ -165,10 +165,12 @@
     <string-array name="render_mode_names">
         <item>@string/render_mode_twod</item>
         <item>@string/threed_mode</item>
+        <item>@string/threed_mode_movie</item>
     </string-array>
     <string-array name="render_mode_values" translatable="false">
         <item>0</item>
         <item>1</item>
+        <item>2</item>
     </string-array>
     <string-array name="mouse_mode_names">
         <item>@string/mouse_mode_multi_touch</item>

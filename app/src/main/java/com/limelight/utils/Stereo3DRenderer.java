@@ -41,6 +41,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -59,6 +60,8 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
     private final int NUM_SMOOTHED_BUFFERS = 3;
     private final int[] pboHandles = new int[2];
     private int pboIndex = 0;
+
+    public static boolean isMovieMode = true;
     private int PBO_SIZE = modelInputWidth * modelInputHeight * 4;
 
     // Public Static Fields
@@ -90,6 +93,8 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
     private int bilateralBlurProgram;
     private int depthMapTextureId;
     private int dibr3dProgram;
+
+    private final AtomicReference<ByteBuffer> latestDepthMap = new AtomicReference<>(null);
     private int fboHandle;
     private int fboTextureId;
     private int filterFboHandle;
@@ -118,7 +123,6 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
     private BlockingQueue<RenderResult> inferenceInputQueue = new ArrayBlockingQueue<>(1);
     private PreferenceConfiguration prefConf;
     private ByteBuffer previousPixelBuffer;
-    private BlockingQueue<ByteBuffer> readyToRenderQueue;
     private Surface videoSurface;
     private SurfaceTexture videoSurfaceTexture;
 
@@ -198,7 +202,6 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
             GLES20.glDeleteFramebuffers(fbos.length, fbos, 0);
         });
 
-        if (readyToRenderQueue != null) readyToRenderQueue.clear();
         if (filledOutputBuffers != null) filledOutputBuffers.clear();
         previousPixelBuffer = null;
         currentlyRenderingMap = null;
@@ -248,7 +251,6 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
 
         int mapSize = modelInputWidth * modelInputHeight;
         freeSmoothedBuffers = new ArrayBlockingQueue<>(NUM_SMOOTHED_BUFFERS);
-        readyToRenderQueue = new ArrayBlockingQueue<>(NUM_SMOOTHED_BUFFERS);
         for (int i = 0; i < NUM_SMOOTHED_BUFFERS; i++) {
             freeSmoothedBuffers.offer(ByteBuffer.allocateDirect(mapSize).order(ByteOrder.nativeOrder()));
         }
@@ -277,7 +279,6 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
             executorService.submit(new AiTask());
         }
         isActive = true;
-        glSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
     }
 
     private void initializeIntermediateFbo() {
@@ -293,6 +294,10 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
     }
 
+    private float getParallax() {
+            return prefConf.parallax_depth * 1.1f;
+    }
+
     private void applyTwoPassGaussianBlur() {
         int blurProgram = bilateralBlurProgram;
 
@@ -303,11 +308,12 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
         int inputTextureHandle = GLES20.glGetUniformLocation(blurProgram, "s_InputTexture");
         int texelSizeHandle = GLES20.glGetUniformLocation(blurProgram, "u_texelSize");
         int directionHandle = GLES20.glGetUniformLocation(blurProgram, "u_blurDirection");
-
+        int parallaxHandle = GLES20.glGetUniformLocation(blurProgram, "u_parallax");
         GLES20.glVertexAttribPointer(posHandle, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
         GLES20.glVertexAttribPointer(texHandle, 2, GLES20.GL_FLOAT, false, 0, textureVertexBuffer);
         GLES20.glEnableVertexAttribArray(posHandle);
         GLES20.glEnableVertexAttribArray(texHandle);
+        GLES20.glUniform1f(parallaxHandle, getParallax());
 
         GLES20.glUniform2f(texelSizeHandle, 1.0f / modelInputWidth, 1.0f / modelInputHeight);
 
@@ -340,7 +346,7 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
         int viewWidth = glSurfaceView.getWidth();
         int viewHeight = glSurfaceView.getHeight();
 
-        float parallax = parallaxStrength * 0.06f;
+        float parallax = getParallax() * 0.06f;
 
         GLES20.glViewport(0, 0, viewWidth / 2, viewHeight);
         drawEye(dualBubble3dProgram, -parallax, convergence, shift);
@@ -398,12 +404,21 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
             }
         }
     }
-
+    private volatile Boolean block= false;
     @Override
     public void onDrawFrame(GL10 gl) {
         long startTime = System.nanoTime();
+
         synchronized (frameLock) {
             if (!frameAvailable.get()) {
+                if(!isMovieMode) {
+                    glSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+                } else {
+                    glSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
+                    return;
+                }
+            } else if(isMovieMode) {
+                block = true;
             }
             frameAvailable.set(false);
         }
@@ -416,26 +431,15 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
 
         if (currentlyRenderingMap != null) {
             freeSmoothedBuffers.offer(currentlyRenderingMap);
-            currentlyRenderingMap = null;
         }
 
-        ByteBuffer newMap = readyToRenderQueue.poll();
-        if (newMap != null) {
-            currentlyRenderingMap = newMap;
-            depthMapResultCount++;
-        }
-
-        if (currentlyRenderingMap != null) {
-            uploadLatestDepthMapToGpu(currentlyRenderingMap);
-        }
-
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-        applyTwoPassGaussianBlur();
-        drawWithShader();
+        long startTimeAi = System.nanoTime();
+        long endTimeAi = System.nanoTime();
         if (tflite != null) {
+            if(block || !isMovieMode) {
             ByteBuffer pixelBufferForAI = freeInputBuffers.poll();
             if (pixelBufferForAI != null) {
-                boolean success = readPixelsForAI_Async(pixelBufferForAI);
+                boolean success = readPixelsForAI(pixelBufferForAI);
                 if (success) {
                     double difference = hasSceneChangedFast(pixelBufferForAI, previousFrameForComparison);
                     pixelBufferForAI.rewind();
@@ -451,6 +455,32 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
                     freeInputBuffers.offer(pixelBufferForAI);
                 }
             }
+            ByteBuffer newMap = null;
+                if(block && isMovieMode) {
+                    while ((newMap = latestDepthMap.getAndSet(null)) == null) {
+                        try {
+                            Thread.sleep(1);
+                        } catch (InterruptedException e) {
+                        }
+                    }
+                } else {
+                    newMap = latestDepthMap.getAndSet(null);
+                }
+                if (newMap != null) {
+                    block = false;
+                    currentlyRenderingMap = newMap;
+                    depthMapResultCount++;
+                    endTimeAi = System.nanoTime();
+                    Log.d("Stereo3DRenderer", "DepthMap OutputSpeed " + (endTimeAi - startTimeAi) / 1_000_000 + " ms");
+                }
+            }
+
+            if (currentlyRenderingMap != null) {
+                uploadLatestDepthMapToGpu(currentlyRenderingMap);
+            }
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+            applyTwoPassGaussianBlur();
+            drawWithShader();
             long endTime = System.nanoTime();
 
             if (lastFpsTime == 0) {
@@ -472,15 +502,13 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
                 int freeInputCap = freeInputBuffers.size() + freeInputBuffers.remainingCapacity();
                 int aiInCap = inferenceInputQueue.size() + inferenceInputQueue.remainingCapacity();
                 int aiOutCap = filledOutputBuffers.size() + filledOutputBuffers.remainingCapacity();
-                int readyRenderCap = readyToRenderQueue.size() + readyToRenderQueue.remainingCapacity();
                 int freeSmoothCap = freeSmoothedBuffers.size() + freeSmoothedBuffers.remainingCapacity();
 
                 String queueStatus = String.format(
-                        "Queues (Free/Cap) | FreeInput: %d/%d, To_AI: %d/%d, From_AI: %d/%d, To_Render: %d/%d, Free_Smooth: %d/%d",
+                        "Queues (Free/Cap) | FreeInput: %d/%d, To_AI: %d/%d, From_AI: %d/%d, Free_Smooth: %d/%d",
                         freeInputBuffers.remainingCapacity(), freeInputCap,
                         inferenceInputQueue.remainingCapacity(), aiInCap,
                         filledOutputBuffers.remainingCapacity(), aiOutCap,
-                        readyToRenderQueue.remainingCapacity(), readyRenderCap,
                         freeSmoothedBuffers.remainingCapacity(), freeSmoothCap
                 );
                 Log.d("Stereo3DRenderer", queueStatus);
@@ -611,6 +639,18 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
         GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0);
     }
 
+    private Boolean readPixelsForAI(ByteBuffer destinationBuffer) {
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fboHandle);
+        GLES20.glViewport(0, 0, modelInputWidth, modelInputHeight);
+        drawQuad(simple3dProgram, 1.0f, 0.0f);
+        destinationBuffer.rewind();
+
+        GLES20.glReadPixels(0, 0, modelInputWidth, modelInputHeight, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, destinationBuffer);
+
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+
+        return true;
+    }
     private boolean readPixelsForAI_Async(ByteBuffer destinationBuffer) {
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fboHandle);
         GLES20.glViewport(0, 0, modelInputWidth, modelInputHeight);
@@ -839,9 +879,12 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
             Imgproc.calcHist(Collections.singletonList(grayMat1), new MatOfInt(0), new Mat(), hist1, new MatOfInt(256), new MatOfFloat(0f, 256f));
             Imgproc.calcHist(Collections.singletonList(grayMat2), new MatOfInt(0), new Mat(), hist2, new MatOfInt(256), new MatOfFloat(0f, 256f));
 
-            double correlation = Imgproc.compareHist(hist1, hist2, Imgproc.HISTCMP_CORREL);
+            double correlation = 1.0 -Imgproc.compareHist(hist1, hist2, Imgproc.HISTCMP_CORREL);
+            if(correlation < 0.001) {
+                correlation = 0.0;
+            }
 
-            return 1.0 - correlation;
+            return correlation;
 
         } finally {
             if (mat1 != null) mat1.release();
@@ -889,9 +932,7 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
         return averageDifference;
     }
 
-    private long lastFrameSnapshot = 0L;
-
-    private float ON_DRAW_CHANGE_TRESHOLD = 5.0f;
+    private float ON_DRAW_CHANGE_TRESHOLD = 1.0f;
 
     private class AiTask implements Runnable {
 
@@ -965,13 +1006,13 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
 
         private static final double IMAGE_DIFFERENCE_MULTIPLIER = 100.0;
         private static final double MAX_SMOOTHING_FACTOR = 1;
+
         private static final double MIN_SMOOTHING_FACTOR = 0.005;
 
         // --- Member Fields ---
         private final byte[] processedDataArray = new byte[modelInputWidth * modelInputHeight];
         private Mat previousSmoothedMat;
         private boolean isFirstFrame = true;
-
         @Override
         public void run() {
             ByteBuffer resultBuffer = createFlatDepthMap();
@@ -987,7 +1028,6 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
                     resultBuffer = freeSmoothedBuffers.take();
                     waitTime = System.nanoTime();
 
-                    // Drain the queue to only process the latest result
                     InferenceResult intermediate;
                     while ((intermediate = filledOutputBuffers.poll()) != null) {
                         freeInputBuffers.offer(result.pixelBuffer);
@@ -1009,9 +1049,10 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
                         isFirstFrame = false;
                     }
 
-                    double smoothing = imageDifference / (threeDFps / 3);
+                    double smoothing = (imageDifference * 10) / (threeDFps * 2);
+                    double minSmoothing = MIN_SMOOTHING_FACTOR;
                     smoothing = Math.min(smoothing, MAX_SMOOTHING_FACTOR);
-                    smoothing = Math.max(smoothing, MIN_SMOOTHING_FACTOR);
+                    smoothing = Math.max(smoothing, minSmoothing);
                     Core.addWeighted(processedMat, smoothing, previousSmoothedMat, 1.0 - smoothing, 0.0, previousSmoothedMat);
 
                     previousSmoothedMat.get(0, 0, processedDataArray);
@@ -1024,7 +1065,7 @@ public class Stereo3DRenderer implements GLSurfaceView.Renderer, SurfaceTexture.
 
                     rawDepthBuffer.rewind();
                     resultBuffer.rewind();
-                    readyToRenderQueue.put(resultBuffer);
+                    latestDepthMap.set(resultBuffer);
 
                     previousPixelBuffer.rewind();
                     previousPixelBuffer.put(currentPixelBuffer);

@@ -33,7 +33,8 @@ public class StreamContainer extends FrameLayout implements SurfaceHolder.Callba
 
     public enum StreamMode {
         MODE_2D,
-        MODE_AI_3D
+        MODE_AI_3D,
+        MODE_AI_3D_MOVIE
     }
 
     private final SurfaceView mSurfaceView;
@@ -207,6 +208,12 @@ public class StreamContainer extends FrameLayout implements SurfaceHolder.Callba
         if (!isInitializing && currentMode == mode) return;
         currentMode = mode;
 
+        if(mode == StreamMode.MODE_AI_3D_MOVIE) {
+            Stereo3DRenderer.isMovieMode = true;
+        } else {
+            Stereo3DRenderer.isMovieMode = false;
+        }
+
         isSurfaceReady = false;
         mCurrentSurface = null;
 
@@ -221,6 +228,9 @@ public class StreamContainer extends FrameLayout implements SurfaceHolder.Callba
                 }
                 break;
             case MODE_AI_3D:
+                mGLSurfaceView.setVisibility(View.VISIBLE);
+                break;
+            case MODE_AI_3D_MOVIE:
                 mGLSurfaceView.setVisibility(View.VISIBLE);
                 break;
         }
