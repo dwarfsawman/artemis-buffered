@@ -231,9 +231,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private TextView performanceOverlayLite;
 
     private TextView performanceOverlayBig;
-    private com.github.mikephil.charting.charts.LineChart perfChartLatency;
-    private com.github.mikephil.charting.charts.LineChart perfChartDecode;
-    private com.github.mikephil.charting.charts.LineChart perfChartFps;
 
     private MediaCodecDecoderRenderer decoderRenderer;
     private boolean reportedCrash;
@@ -345,8 +342,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     @SuppressLint({"MissingInflatedId", "ClickableViewAccessibility"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        normalizeChartsOverlayPrefs();
-
         super.onCreate(savedInstanceState);
 
         instance = this;
@@ -521,13 +516,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         performanceOverlayLite = findViewById(R.id.performanceOverlayLite);
 
         performanceOverlayBig = findViewById(R.id.performanceOverlayBig);
-        // Charts
-        try {
-            perfChartLatency = findViewById(R.id.perfChartLatency);
-            perfChartDecode  = findViewById(R.id.perfChartDecode);
-            perfChartFps     = findViewById(R.id.perfChartFps);
-        } catch (Throwable ignored) {}
-
 
         inputCaptureProvider = InputCaptureManager.getInputCaptureProvider(this, this);
 
@@ -637,30 +625,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         // Check if the user has enabled performance stats overlay
-        if (prefConfig.enablePerfOverlay || prefConfig.enablePerfCharts) {
+        if (prefConfig.enablePerfOverlay) {
             performanceOverlayView.setVisibility(View.VISIBLE);
-
-
-// Charts visibility (force)
-            if (prefConfig.enablePerfCharts || prefConfig.perfChartLatency || prefConfig.perfChartDecode || prefConfig.perfChartFps) {
-                if (perfChartLatency != null) perfChartLatency.setVisibility(prefConfig.perfChartLatency ? View.VISIBLE : View.GONE);
-                if (perfChartDecode  != null) perfChartDecode.setVisibility(prefConfig.perfChartDecode  ? View.VISIBLE : View.GONE);
-                if (perfChartFps     != null) perfChartFps.setVisibility(prefConfig.perfChartFps      ? View.VISIBLE : View.GONE);
-            } else {
-                if (perfChartLatency != null) perfChartLatency.setVisibility(View.GONE);
-                if (perfChartDecode  != null) perfChartDecode.setVisibility(View.GONE);
-                if (perfChartFps     != null) perfChartFps.setVisibility(View.GONE);
-            }
-// Charts visibility
-            if (prefConfig.enablePerfCharts) {
-                if (perfChartLatency != null) perfChartLatency.setVisibility(prefConfig.perfChartLatency ? View.VISIBLE : View.GONE);
-                if (perfChartDecode  != null) perfChartDecode.setVisibility(prefConfig.perfChartDecode  ? View.VISIBLE : View.GONE);
-                if (perfChartFps     != null) perfChartFps.setVisibility(prefConfig.perfChartFps      ? View.VISIBLE : View.GONE);
-            } else {
-                if (perfChartLatency != null) perfChartLatency.setVisibility(View.GONE);
-                if (perfChartDecode  != null) perfChartDecode.setVisibility(View.GONE);
-                if (perfChartFps     != null) perfChartFps.setVisibility(View.GONE);
-            }
             if (prefConfig.enablePerfOverlayLite) {
                 performanceOverlayLite.setVisibility(View.VISIBLE);
                 if(prefConfig.enablePerfOverlayLiteDialog){
@@ -1297,7 +1263,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                     keyBoardLayoutController.show();
                 }
 
-                if (prefConfig.enablePerfOverlay || prefConfig.enablePerfCharts || (prefConfig.perfChartLatency || prefConfig.perfChartDecode || prefConfig.perfChartFps)) {
+                if (prefConfig.enablePerfOverlay) {
                     performanceOverlayView.setVisibility(View.VISIBLE);
                 }
 
@@ -3942,62 +3908,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-
-                /*__CHART_FEED__*/
-                try {
-                    if (prefConfig != null && (prefConfig.enablePerfCharts || prefConfig.perfChartLatency || prefConfig.perfChartDecode || prefConfig.perfChartFps)) {
-                        String t = text;
-                        java.util.regex.Matcher m;
-                        // Latency (prefer labeled)
-                        Float __lat = null;
-                        m = java.util.regex.Pattern.compile("Average network latency:\\s*(\\d+)\\s*ms").matcher(t);
-                        if (m.find()) { __lat = Float.parseFloat(m.group(1).replace(',', '.')); }
-                        if (__lat == null) {
-                            m = java.util.regex.Pattern.compile("\\b(\\d{1,4})\\s*ms\\b").matcher(t);
-                            if (m.find()) { __lat = Float.parseFloat(m.group(1).replace(',', '.')); }
-                        }
-                        if (__lat != null && prefConfig.perfChartLatency && perfChartLatency != null) {
-                            Game.this.addChartPoint(perfChartLatency, __lat);
-                        }
-
-                        // Decode (prefer labeled)
-                        Float __dec = null;
-                        m = java.util.regex.Pattern.compile("Average decoding time:\\s*([0-9]+(?:[\\.,][0-9]+)?)\\s*ms").matcher(t);
-                        if (m.find()) { __dec = Float.parseFloat(m.group(1).replace(',', '.')); }
-
-
-                        if (__dec == null) {
-                            // Lite overlay pattern: "<latency>ms / <decode>ms"
-                            try {
-                                java.util.regex.Matcher mm = java.util.regex.Pattern
-                                        .compile("(\\d{1,4})\\s*ms\\s*/\\s*([0-9]+(?:[\\.,][0-9]+)?)\\s*ms")
-                                        .matcher(t);
-                                if (mm.find()) {
-                                    __dec = Float.parseFloat(mm.group(2).replace(',', '.'));
-                                }
-                            } catch (Throwable ignored) {}
-                        }
-
-
-                        if (__dec != null && prefConfig.perfChartDecode && perfChartDecode != null) {
-                            Game.this.addChartPoint(perfChartDecode, __dec);
-                        }
-
-                        // FPS (prefer rendered FPS label)
-                        Float __fps = null;
-                        m = java.util.regex.Pattern.compile("Rendering frame rate:\\s*([0-9]+(?:\\.[0-9]+)?)\\s*FPS").matcher(t);
-                        if (m.find()) { __fps = Float.parseFloat(m.group(1).replace(',', '.')); }
-                        if (__fps == null) {
-                            m = java.util.regex.Pattern.compile("FPS[：: ]\\s*([0-9]+(?:\\.[0-9]+)?)").matcher(t);
-                            if (m.find()) { __fps = Float.parseFloat(m.group(1).replace(',', '.')); }
-                        }
-                        if (__fps != null && prefConfig.perfChartFps && perfChartFps != null) {
-                            Game.this.addChartPoint(perfChartFps, __fps);
-                        }
-                    }
-                } catch (Throwable ignored) {}
-                /*__CHART_FEED_END__*/
-
                 if(prefConfig.enablePerfOverlayLite){
                     performanceOverlayLite.setText(text);
                 }else{
@@ -4410,78 +4320,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             }
         }
         return null;
-    }
-
-
-
-    // --- Chart helper: push a point and keep a sliding window ---
-    private void addChartPoint(com.github.mikephil.charting.charts.LineChart chart, float y) {
-        if (chart == null) return;
-        try {
-            if (chart.getData() == null) {
-                chart.setData(new com.github.mikephil.charting.data.LineData());
-            }
-            com.github.mikephil.charting.data.LineData data = chart.getData();
-            com.github.mikephil.charting.interfaces.datasets.ILineDataSet set = data.getDataSetByIndex(0);
-            if (set == null) {
-                com.github.mikephil.charting.data.LineDataSet s =
-                        new com.github.mikephil.charting.data.LineDataSet(
-                                new java.util.ArrayList<>(), null);
-                s.setDrawCircles(false);
-                s.setDrawValues(false);
-                s.setLineWidth(1.1f);
-                data.addDataSet(s);
-                set = s;
-            }
-            data.addEntry(new com.github.mikephil.charting.data.Entry(set.getEntryCount(), y), 0);
-            data.notifyDataChanged();
-            chart.notifyDataSetChanged();
-            chart.setVisibleXRangeMaximum(240); // ~4s @60fps
-            chart.moveViewToX(data.getEntryCount());
-            chart.invalidate();
-        } catch (Throwable ignored) {}
-    }
-
-
-    // Ensure Charts & Overlay Lite invariants:
-    // - If Charts is enabled but Overlay Lite is off, auto-enable Overlay + Overlay Lite.
-    // - If Overlay Lite is turned off, auto-disable Charts.
-    private void normalizeChartsOverlayPrefs() {
-        try {
-            android.content.SharedPreferences prefs =
-                    androidx.preference.PreferenceManager.getDefaultSharedPreferences(this);
-            boolean charts = prefs.getBoolean("checkbox_enable_perf_charts", false);
-            boolean overlay = prefs.getBoolean("checkbox_enable_perf_overlay", false);
-            boolean overlayLite = prefs.getBoolean("checkbox_enable_perf_overlay_lite", false);
-
-            android.content.SharedPreferences.Editor e = null;
-
-            if (charts && !overlayLite) {
-                if (e == null) e = prefs.edit();
-                e.putBoolean("checkbox_enable_perf_overlay", true);
-                e.putBoolean("checkbox_enable_perf_overlay_lite", true);
-                overlay = true;
-                overlayLite = true;
-            }
-
-            if (!overlayLite && charts) {
-                if (e == null) e = prefs.edit();
-                e.putBoolean("checkbox_enable_perf_charts", false);
-                charts = false;
-            }
-
-            if (e != null) e.apply();
-
-            // Reflect to in-memory config if present
-            try {
-                if (prefConfig != null) {
-                    prefConfig.enablePerfCharts = charts;
-                    prefConfig.enablePerfOverlay = overlay;
-                    prefConfig.enablePerfOverlayLite = overlayLite;
-                }
-            } catch (Throwable ignored) {}
-
-        } catch (Throwable ignored) {}
     }
 
 }
