@@ -1,4 +1,32 @@
-# Artemis Android
+# artemis-buffered
+
+## What's this
+
+40 msの遅延と引き換えに、数十ms程度のジッターがある環境で音声が途切れないようにしたフォークです。
+
+ネットカフェなどの共有Wi-Fi（目安: ping 50 ms前後）で、AndroidからWindows PCへ接続した際の音声途切れを抑えることを目的とした[Artemis Android v20.2.6](https://github.com/ClassicOldSong/moonlight-android/tree/v20.2.6)の実験的フォークです。
+
+このフォークは、Windows RDPのようなリモートデスクトップ音声がクライアント側でネットワーク揺らぎを吸収する設計思想を参考に、ユーザーの依頼を受けてOpenAI Codexがコード調査・実装・テストを行いました。[RDP Audio Output Virtual Channel仕様](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpea/)の互換実装や複製ではなく、ジッターバッファと小幅な時間伸縮という一般的な考え方から着想したものです。
+
+## このフォークの音声変更
+
+- Android 8.1以降では、AAudioデータコールバックとlock-free SPSCリングバッファを使用
+- 初回は40 ms蓄積してから再生を開始
+- 到着ジッターに応じて目標バッファを20～80 msで適応制御
+- WSOLA型の相関選択付きoverlap-addにより、必要なときだけ0.97～1.03倍で時間伸縮
+- アンダーラン後は停止・flush・40 msの再蓄積を行わず、不足分を無音にして再生を継続
+- Android 8.0以前、AAudioを利用できない端末、Audio FX使用時は従来のAudioTrackへフォールバック
+- Opus Deep PLCは含めず、元のPLC動作を維持
+
+120秒、5 ms音声パケット、片道15～35 ms（RTT 30～70 ms）、1%に6 msのスケジューラ揺らぎを加えた決定論的試験では、固定40 ms版と適応版の音声枯渇はいずれも0で、平均リング量は41.23 msから30.76 msへ減少しました。これは実機Wi-Fi試験ではなくアプリ側シミュレーションであり、端末固有のAAudioバースト、ミキサー、CPU負荷、聴感品質は別途確認が必要です。
+
+### English summary
+
+This experimental fork targets shared Wi-Fi environments such as internet cafés at around 50 ms ping. At the user's request, OpenAI Codex implemented an adaptive 20–80 ms AAudio/SPSC jitter buffer with correlation-selected WSOLA-style 0.97–1.03x time scaling. It starts at 40 ms and never pauses to refill after an underrun. Deep PLC is intentionally not included.
+
+## Upstream project
+
+### Artemis Android
 
 Previously named Moonlight Noir
 
@@ -11,7 +39,7 @@ Artemis is currently the best fork of Moonlight with loads of optimizations for 
 
 A more seamless experience with virtual display will be Artemis paired with [Apollo](https://github.com/ClassicOldSong/Apollo).
 
-# Features
+## Upstream features
 
 If you switch back to the main stream version, you'll be missing the following awesome features which are very unlikely to be added there:
 
@@ -46,7 +74,7 @@ If you switch back to the main stream version, you'll be missing the following a
 29. Server Command integration with [Apollo](https://github.com/ClassicOldSong/Apollo)
 30. Clipboard sync (requires Apollo)
 
-# Disclaimer
+## Upstream disclaimer
 
 This is the `go away` version of Moonlight Android.
 
@@ -63,8 +91,8 @@ The main repo had stayed silent for 5 months, with nobody actually responding to
 **Update**: They have contacted me and apologized for this incident, but the fact it **happened** still motivated me to start my own fork.
 
 ## Downloads
-* [Download APK directly](https://github.com/ClassicOldSong/moonlight-android/releases)
-* [Use Obtainium](https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22com.limelight.noir%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2FClassicOldSong%2Fmoonlight-android%22%2C%22author%22%3A%22ClassicOldSong%22%2C%22name%22%3A%22Artemis%22%2C%22additionalSettings%22%3A%22%7B%5C%22apkFilterRegEx%5C%22%3A%5C%22nonRoot%5C%22%2C%5C%22matchGroutToUse%5C%22%3A%5C%22%241%5C%22%2C%5C%22versionExtractionRegEx%5C%22%3A%5C%22v(.%2B)%5C%22%7D%22%7D) (recommended)
+* [artemis-buffered releases](https://github.com/dwarfsawman/artemis-buffered/releases)
+* [Upstream Artemis releases](https://github.com/ClassicOldSong/moonlight-android/releases)
 
 ## Building
 * Install Android Studio and the Android NDK

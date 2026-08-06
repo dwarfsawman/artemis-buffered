@@ -56,23 +56,6 @@
         <item>71</item>
     </string-array>
 
-    <string-array name="audio_buffer_names">
-        <item>@string/audio_buffer_disabled</item>
-        <item>20 ms</item>
-        <item>@string/audio_buffer_recommended</item>
-        <item>80 ms</item>
-        <item>120 ms</item>
-        <item>@string/audio_buffer_diagnostic</item>
-    </string-array>
-    <string-array name="audio_buffer_values" translatable="false">
-        <item>0</item>
-        <item>20</item>
-        <item>40</item>
-        <item>80</item>
-        <item>120</item>
-        <item>200</item>
-    </string-array>
-
     <!-- Don't forget to update locales_config.xml when you modify this! -->
     <string-array name="language_names" translatable="false">
         <item>Default</item>

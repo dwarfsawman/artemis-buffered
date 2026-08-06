@@ -23,8 +23,7 @@ public class AndroidAudioRenderer implements AudioRenderer {
 
     private final Context context;
     private final boolean enableAudioFx;
-    private final int audioBufferMs;
-    private final long[] nativeStats = new long[6];
+    private final long[] nativeStats = new long[11];
 
     private AudioTrack track;
     private long nativeRenderer;
@@ -34,13 +33,13 @@ public class AndroidAudioRenderer implements AudioRenderer {
     private boolean closing;
     private long nextStatsLogTimeMs;
 
-    public AndroidAudioRenderer(Context context, boolean enableAudioFx, int audioBufferMs) {
+    public AndroidAudioRenderer(Context context, boolean enableAudioFx) {
         this.context = context;
         this.enableAudioFx = enableAudioFx;
-        this.audioBufferMs = Math.max(0, Math.min(500, audioBufferMs));
     }
 
-    private static native long nativeCreate(int sampleRate, int channelCount, int bufferMs);
+    private static native long nativeCreate(int sampleRate, int channelCount, int samplesPerFrame,
+                                            boolean adaptive);
     private static native void nativeArm(long handle);
     private static native int nativeWrite(long handle, short[] audioData);
     private static native void nativeGetStats(long handle, long[] stats);
@@ -91,9 +90,10 @@ public class AndroidAudioRenderer implements AudioRenderer {
         // AAudio uses a high-priority callback to consume a separate PCM jitter ring.
         // Audio effects require an AudioTrack session, so preserve the legacy path for that case.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && !enableAudioFx) {
-            nativeRenderer = nativeCreate(sampleRate, channelCount, audioBufferMs);
+            nativeRenderer = nativeCreate(sampleRate, channelCount, samplesPerFrame, true);
             if (nativeRenderer != 0) {
-                LimeLog.info("Using callback AAudio renderer with " + audioBufferMs + " ms target");
+                LimeLog.info("Using adaptive callback AAudio renderer: 20-80 ms target, " +
+                        "initial=40 ms, WSOLA rate=0.97-1.03, no underrun rebuffering");
                 return 0;
             }
             LimeLog.warning("AAudio renderer unavailable; falling back to low-latency AudioTrack");
@@ -219,11 +219,18 @@ public class AndroidAudioRenderer implements AudioRenderer {
         long queuedMs = sampleRate == 0 ? 0 : nativeStats[0] * 1000 / sampleRate;
         long underrunMs = sampleRate == 0 ? 0 : nativeStats[2] * 1000 / sampleRate;
         long droppedMs = sampleRate == 0 ? 0 : nativeStats[3] * 1000 / sampleRate;
+        long targetMs = sampleRate == 0 ? 40 : nativeStats[6] * 1000 / sampleRate;
+        double playbackRate = nativeStats[7] / 1_000_000.0;
+        double jitterMs = nativeStats[8] / 1_000.0;
         LimeLog.info("AAudio jitter stats: queued=" + queuedMs +
+                " ms, target=" + targetMs +
+                " ms, rate=" + String.format("%.3f", playbackRate) +
+                ", jitter=" + String.format("%.2f", jitterMs) +
                 " ms, underrunCallbacks=" + nativeStats[1] +
                 ", underrun=" + underrunMs +
                 " ms, dropped=" + droppedMs +
-                " ms, xrun=" + nativeStats[4] +
+                " ms, stretchDeltaFrames=" + nativeStats[9] +
+                ", xrun=" + nativeStats[4] +
                 ", error=" + nativeStats[5]);
     }
 
