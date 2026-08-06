@@ -2,7 +2,10 @@
 
 ## What's this
 
-40 msの遅延と引き換えに、数十ms程度のジッターがある環境で音声が途切れないようにしたフォークです。
+40 msの遅延と引き換えに、数十ms程度のジッターがある環境で音声が途切れないようにしたフォーク。
+このフォークはcodexを使って作成。
+
+ーーー
 
 ネットカフェなどの共有Wi-Fi（目安: ping 50 ms前後）で、AndroidからWindows PCへ接続した際の音声途切れを抑えることを目的とした[Artemis Android v20.2.6](https://github.com/ClassicOldSong/moonlight-android/tree/v20.2.6)の実験的フォークです。
 
