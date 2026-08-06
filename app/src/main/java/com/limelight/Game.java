@@ -3691,7 +3691,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
             decoderRenderer.setRenderTarget(holder.getSurface());
             audioRenderer = new AndroidAudioRenderer(Game.this, prefConfig.enableAudioFx,
-                    prefConfig.enableAudioDiagnostics);
+                    prefConfig.enableAudioDiagnostics, prefConfig.enableAdaptiveAudioBuffer);
             conn.start(audioRenderer, decoderRenderer, Game.this);
         }
 

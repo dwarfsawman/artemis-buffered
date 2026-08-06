@@ -30,4 +30,18 @@ public class AudioDiagnosticsPreferenceTest {
                 .commit();
         assertTrue(PreferenceConfiguration.isAudioDiagnosticsEnabled(preferences));
     }
+
+    @Test
+    public void fixedAudioBufferIsDefaultAndAdaptiveModeIsOptIn() {
+        Context context = ApplicationProvider.getApplicationContext();
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        preferences.edit().clear().commit();
+
+        assertFalse(PreferenceConfiguration.isAdaptiveAudioBufferEnabled(preferences));
+
+        preferences.edit()
+                .putBoolean(PreferenceConfiguration.ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING, true)
+                .commit();
+        assertTrue(PreferenceConfiguration.isAdaptiveAudioBufferEnabled(preferences));
+    }
 }

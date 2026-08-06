@@ -186,6 +186,9 @@
 \nモニターが必要な表示設定をサポートしていない場合もあります。その場合は、仮想モニターを設定してみてください。最後に、デバイスまたはホストPCが特定の解像度またはリフレッシュレートでのストリーミングをサポートしていない場合、残念ながら運が悪かったということになります。</string>
     <string name="title_checkbox_enable_audio_diagnostics">音声診断ログ</string>
     <string name="summary_checkbox_enable_audio_diagnostics">直近8回のストリーミングについて、音声バッファ、ジッター、アンダーラン、破棄、書き込みエラーを時刻付きで記録します。共有するまでログは端末内だけに保存されます。</string>
+    <string name="category_artemis_buffered_settings">Artemis Buffered（固有設定）</string>
+    <string name="title_checkbox_enable_adaptive_audio_buffer">適応20～80 ms＋WSOLA型処理</string>
+    <string name="summary_checkbox_enable_adaptive_audio_buffer">オフ（既定）：AAudioコールバック＋SPSCリングを固定40 ms、WSOLAなし。オン：適応20～80 ms＋WSOLA型の時間伸縮。どちらもアンダーラン後の再バッファリングは行いません。Android 8.1以降のみ（音声エフェクト有効時はAudioTrackを使用）。</string>
     <string name="title_share_audio_diagnostic_logs">音声診断ログを共有</string>
     <string name="summary_share_audio_diagnostic_logs">最近の音声セッションログを分析用のZIPファイルとして書き出します</string>
     <string name="toast_no_audio_diagnostic_logs">音声診断ログはまだ記録されていません</string>

@@ -438,6 +438,9 @@
     <string name="summary_checkbox_enable_perf_logging">"Stores performance data per configuration. (Offline only) "</string>
     <string name="title_checkbox_enable_audio_diagnostics">Audio diagnostic logging</string>
     <string name="summary_checkbox_enable_audio_diagnostics">Record timestamped audio buffer, jitter, underrun, drop, and write-error data for the 8 most recent streaming sessions. Logs stay on this device until shared.</string>
+    <string name="category_artemis_buffered_settings">Artemis Buffered (custom settings)</string>
+    <string name="title_checkbox_enable_adaptive_audio_buffer">Adaptive 20–80 ms + WSOLA-style processing</string>
+    <string name="summary_checkbox_enable_adaptive_audio_buffer">Off (default): fixed 40 ms AAudio callback + SPSC ring, without WSOLA. On: adaptive 20–80 ms target with WSOLA-style time stretching. Neither mode re-buffers after an underrun. Android 8.1+ only; audio effects use AudioTrack instead.</string>
     <string name="title_share_audio_diagnostic_logs">Share audio diagnostic logs</string>
     <string name="summary_share_audio_diagnostic_logs">Export recent audio session logs as a ZIP file for analysis</string>
     <string name="toast_no_audio_diagnostic_logs">No audio diagnostic logs have been recorded yet</string>

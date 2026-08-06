@@ -35,6 +35,7 @@ public class AndroidAudioRenderer implements AudioRenderer {
 
     private final Context context;
     private final boolean enableAudioFx;
+    private final boolean adaptiveAudioBuffer;
     private final AudioDiagnosticsLogger diagnostics;
     private final long[] nativeStats = new long[NATIVE_STATS_COUNT];
     private final long[] nativeDiagnosticEvents =
@@ -57,9 +58,10 @@ public class AndroidAudioRenderer implements AudioRenderer {
     private long fallbackDroppedPackets;
 
     public AndroidAudioRenderer(Context context, boolean enableAudioFx,
-                                boolean enableAudioDiagnostics) {
+                                boolean enableAudioDiagnostics, boolean adaptiveAudioBuffer) {
         this.context = context;
         this.enableAudioFx = enableAudioFx;
+        this.adaptiveAudioBuffer = adaptiveAudioBuffer;
         this.diagnostics = enableAudioDiagnostics ? AudioDiagnosticsLogger.start(context) : null;
     }
 
@@ -121,26 +123,39 @@ public class AndroidAudioRenderer implements AudioRenderer {
                 "sampleRate", sampleRate,
                 "channelCount", channelCount,
                 "samplesPerFrame", samplesPerFrame,
-                "audioFxEnabled", enableAudioFx);
+                "audioFxEnabled", enableAudioFx,
+                "selectedBufferMode", getSelectedBufferMode(),
+                "aaudioEligible", Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && !enableAudioFx,
+                "underrunRebuffering", false);
 
         // AAudio uses a high-priority callback to consume a separate PCM jitter ring.
         // Audio effects require an AudioTrack session, so preserve the legacy path for that case.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && !enableAudioFx) {
-            nativeRenderer = nativeCreate(sampleRate, channelCount, samplesPerFrame, true,
+            nativeRenderer = nativeCreate(sampleRate, channelCount, samplesPerFrame,
+                    adaptiveAudioBuffer,
                     diagnostics != null);
             if (nativeRenderer != 0) {
-                LimeLog.info("Using adaptive callback AAudio renderer: 20-80 ms target, " +
-                        "initial=40 ms, WSOLA rate=0.97-1.03, no underrun rebuffering");
+                int minimumTargetMs = adaptiveAudioBuffer ? 20 : 40;
+                int maximumTargetMs = adaptiveAudioBuffer ? 80 : 40;
+                LimeLog.info(adaptiveAudioBuffer ?
+                        "Using adaptive callback AAudio renderer: 20-80 ms target, " +
+                                "initial=40 ms, WSOLA rate=0.97-1.03, no underrun rebuffering" :
+                        "Using fixed callback AAudio renderer: 40 ms SPSC ring, " +
+                                "no WSOLA, no underrun rebuffering");
                 recordDiagnostic("renderer_started",
                         "renderer", "AAudio",
-                        "adaptive", true,
+                        "bufferMode", getSelectedBufferMode(),
+                        "adaptive", adaptiveAudioBuffer,
+                        "wsolaEnabled", adaptiveAudioBuffer,
+                        "underrunRebuffering", false,
                         "initialTargetMs", 40,
-                        "minimumTargetMs", 20,
-                        "maximumTargetMs", 80);
+                        "minimumTargetMs", minimumTargetMs,
+                        "maximumTargetMs", maximumTargetMs);
                 return 0;
             }
             LimeLog.warning("AAudio renderer unavailable; falling back to low-latency AudioTrack");
-            recordDiagnostic("aaudio_unavailable");
+            recordDiagnostic("aaudio_unavailable",
+                    "selectedBufferMode", getSelectedBufferMode());
         }
 
         return setupAudioTrack(audioConfiguration, sampleRate, samplesPerFrame);
@@ -199,6 +214,8 @@ public class AndroidAudioRenderer implements AudioRenderer {
                         " bytes, lowLatency=" + lowLatency);
                 recordDiagnostic("renderer_started",
                         "renderer", "AudioTrack",
+                        "bufferMode", "audio_track_fallback",
+                        "selectedBufferMode", getSelectedBufferMode(),
                         "bufferBytes", bufferSize,
                         "lowLatency", lowLatency,
                         "channelConfig", String.format("0x%X", channelConfig));
@@ -218,6 +235,10 @@ public class AndroidAudioRenderer implements AudioRenderer {
         }
 
         return -2;
+    }
+
+    private String getSelectedBufferMode() {
+        return adaptiveAudioBuffer ? "adaptive_20_80ms_wsola" : "fixed_40ms";
     }
 
     @Override
