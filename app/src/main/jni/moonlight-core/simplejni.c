@@ -218,6 +218,17 @@ Java_com_limelight_nvstream_jni_MoonBridge_getEstimatedRttInfo(JNIEnv *env, jcla
     return ((uint64_t)rtt << 32U) | variance;
 }
 
+JNIEXPORT jlong JNICALL
+Java_com_limelight_nvstream_jni_MoonBridge_getEstimatedControlPacketLossInfo(JNIEnv *env, jclass clazz) {
+    uint32_t packetLoss, variance;
+
+    if (!LiGetEstimatedControlPacketLossInfo(&packetLoss, &variance)) {
+        return -1;
+    }
+
+    return ((uint64_t)packetLoss << 32U) | variance;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_limelight_nvstream_jni_MoonBridge_getLaunchUrlQueryParameters(JNIEnv *env, jclass clazz) {
     return (*env)->NewStringUTF(env, LiGetLaunchUrlQueryParameters());

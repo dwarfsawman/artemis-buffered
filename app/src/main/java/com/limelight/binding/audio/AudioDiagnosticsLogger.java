@@ -38,6 +38,10 @@ import java.util.zip.ZipOutputStream;
  * Each line is a standalone JSON object so logs can be streamed into common analysis tools.
  */
 public final class AudioDiagnosticsLogger {
+    public interface DeferredFields {
+        Object[] get();
+    }
+
     private static final String LOG_DIRECTORY = "audio-diagnostics";
     private static final String LOG_PREFIX = "audio-diagnostics-";
     private static final String LOG_SUFFIX = ".jsonl";
@@ -95,6 +99,29 @@ public final class AudioDiagnosticsLogger {
                 SystemClock.elapsedRealtimeNanos(),
                 fields,
                 false);
+    }
+
+    /** Samples potentially blocking diagnostic sources on the writer thread. */
+    public void recordDeferred(String event, DeferredFields fieldsSupplier) {
+        if (closed.get()) {
+            return;
+        }
+
+        long wallTimeMs = System.currentTimeMillis();
+        long elapsedNanos = SystemClock.elapsedRealtimeNanos();
+        try {
+            writer.execute(() -> {
+                try {
+                    append(buildRecord(event, wallTimeMs, elapsedNanos, fieldsSupplier.get()));
+                }
+                catch (RuntimeException e) {
+                    LimeLog.warning("Unable to sample audio diagnostics: " + e.getMessage());
+                }
+            });
+        }
+        catch (RejectedExecutionException ignored) {
+            // A late diagnostic sample can race with shutdown.
+        }
     }
 
     /** Records an event captured against Android's elapsed-realtime clock. */

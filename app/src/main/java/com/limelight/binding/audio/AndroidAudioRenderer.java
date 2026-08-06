@@ -65,6 +65,11 @@ public class AndroidAudioRenderer implements AudioRenderer {
         this.diagnostics = enableAudioDiagnostics ? AudioDiagnosticsLogger.start(context) : null;
     }
 
+    /** Shares this renderer's session logger with the video/network diagnostics producer. */
+    public AudioDiagnosticsLogger getDiagnosticsLogger() {
+        return diagnostics;
+    }
+
     private static native long nativeCreate(int sampleRate, int channelCount, int samplesPerFrame,
                                             boolean adaptive, boolean diagnosticsEnabled);
     private static native void nativeArm(long handle);

@@ -16,6 +16,7 @@ import org.jcodec.codecs.h264.io.model.VUIParameters;
 import com.limelight.BuildConfig;
 import com.limelight.LimeLog;
 import com.limelight.R;
+import com.limelight.binding.audio.AudioDiagnosticsLogger;
 import com.limelight.nvstream.av.video.VideoDecoderRenderer;
 import com.limelight.nvstream.jni.MoonBridge;
 import com.limelight.preferences.PreferenceConfiguration;
@@ -114,6 +115,8 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
     private VideoStats activeWindowVideoStats;
     private VideoStats lastWindowVideoStats;
     private VideoStats globalVideoStats;
+    private final NetworkDiagnostics networkDiagnostics;
+    private AudioDiagnosticsLogger audioDiagnostics;
 
     private long lastTimestampUs;
     private int lastFrameNumber;
@@ -302,6 +305,10 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
         this.renderTarget = renderTarget;
     }
 
+    public void setAudioDiagnosticsLogger(AudioDiagnosticsLogger audioDiagnostics) {
+        this.audioDiagnostics = audioDiagnostics;
+    }
+
     public MediaCodecDecoderRenderer(Activity activity, PreferenceConfiguration prefs,
                                      CrashListener crashListener, int consecutiveCrashCount,
                                      boolean meteredData, boolean requestedHdr, boolean invertResolution,
@@ -320,6 +327,7 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
         this.activeWindowVideoStats = new VideoStats();
         this.lastWindowVideoStats = new VideoStats();
         this.globalVideoStats = new VideoStats();
+        this.networkDiagnostics = new NetworkDiagnostics(activity);
 
         avcDecoder = findAvcDecoder();
         if (avcDecoder != null) {
@@ -1434,6 +1442,15 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
 
         // Flip stats windows roughly every second
         if (SystemClock.uptimeMillis() >= activeWindowVideoStats.measurementStartTimestamp + 1000) {
+            if (audioDiagnostics != null) {
+                networkDiagnostics.record(audioDiagnostics,
+                        activeWindowVideoStats,
+                        initialWidth,
+                        initialHeight,
+                        refreshRate,
+                        prefs.bitrate);
+            }
+
             if (prefs.enablePerfOverlay || prefs.enablePerfLogging) {
                 VideoStats lastTwo = new VideoStats();
                 lastTwo.add(lastWindowVideoStats);
@@ -1751,6 +1768,7 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
 
         activeWindowVideoStats.totalFramesReceived++;
         activeWindowVideoStats.totalFrames++;
+        activeWindowVideoStats.totalVideoBytes += decodeUnitLength;
 
         if (!FRAME_RENDER_TIME_ONLY) {
             // Count time from first packet received to enqueue time as receive time

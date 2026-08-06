@@ -88,6 +88,26 @@ public class AudioDiagnosticsLoggerTest {
         assertTrue(records.get(1).getLong("sessionElapsedMs") >= 0);
     }
 
+    @Test
+    public void samplesDeferredFieldsBeforeSessionEnd() throws Exception {
+        AudioDiagnosticsLogger logger = AudioDiagnosticsLogger.start(context);
+        assertNotNull(logger);
+
+        logger.recordDeferred("network_stats", () -> new Object[] {
+                "rttMs", 12,
+                "networkTransport", "wifi"
+        });
+        logger.close("test_complete");
+        assertTrue(logger.awaitWriterForTest(2000));
+
+        File[] logs = new File(context.getFilesDir(), "audio-diagnostics").listFiles();
+        assertNotNull(logs);
+        List<JSONObject> records = readRecords(logs[0]);
+        assertEquals("network_stats", records.get(1).getString("event"));
+        assertEquals(12, records.get(1).getInt("rttMs"));
+        assertEquals("session_end", records.get(2).getString("event"));
+    }
+
     private static List<JSONObject> readRecords(File file) throws Exception {
         List<JSONObject> records = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {

@@ -412,6 +412,10 @@ public class MoonBridge {
     // The RTT is in the top 32 bits, and the RTT variance is in the bottom 32 bits
     public static native long getEstimatedRttInfo();
 
+    // ENet control packet loss is in the top 32 bits, and variance is in the bottom 32 bits.
+    // Both use a scale of 1 << 16, where 1 << 16 represents 100% loss.
+    public static native long getEstimatedControlPacketLossInfo();
+
     public static native String getLaunchUrlQueryParameters();
 
     public static native byte guessControllerType(int vendorId, int productId);

@@ -10,6 +10,7 @@ import static com.limelight.utils.ServerHelper.getSecondaryDisplay;
 
 import com.limelight.binding.PlatformBinding;
 import com.limelight.binding.audio.AndroidAudioRenderer;
+import com.limelight.binding.audio.AudioDiagnosticsLogger;
 import com.limelight.binding.input.ControllerHandler;
 import com.limelight.binding.input.GameInputDevice;
 import com.limelight.binding.input.KeyboardTranslator;
@@ -3534,6 +3535,16 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public void connectionStatusUpdate(final int connectionStatus) {
+        AndroidAudioRenderer currentAudioRenderer = audioRenderer;
+        if (currentAudioRenderer != null) {
+            AudioDiagnosticsLogger diagnostics = currentAudioRenderer.getDiagnosticsLogger();
+            if (diagnostics != null) {
+                diagnostics.record("connection_quality_change",
+                        "statusCode", connectionStatus,
+                        "status", connectionStatus == MoonBridge.CONN_STATUS_POOR ? "poor" : "okay");
+            }
+        }
+
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -3692,6 +3703,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             decoderRenderer.setRenderTarget(holder.getSurface());
             audioRenderer = new AndroidAudioRenderer(Game.this, prefConfig.enableAudioFx,
                     prefConfig.enableAudioDiagnostics, prefConfig.enableAdaptiveAudioBuffer);
+            decoderRenderer.setAudioDiagnosticsLogger(audioRenderer.getDiagnosticsLogger());
             conn.start(audioRenderer, decoderRenderer, Game.this);
         }
 
