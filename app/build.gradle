@@ -11,8 +11,8 @@ android {
         minSdk 21
         targetSdk 34
 
-        versionName "20.2.6"
-        versionCode = 57
+        versionName "20.2.6-buffered.2"
+        versionCode = 5802
 
         // Generate native debug symbols to allow Google Play to symbolicate our native crashes
         ndk.debugSymbolLevel = 'FULL'
@@ -40,7 +40,7 @@ android {
                     "obtainium_app_url",
                     "data:text/html;base64,PGgxPlJvb3QgYnVpbGQgaXMgbm90IGF2YWlsYWJsZTwvaDE+"
 
-            applicationId "com.limelight.root"
+            applicationId "io.github.artemisbuffered.root"
             dimension "root"
             buildConfigField "boolean", "ROOT_BUILD", "true"
         }
@@ -54,9 +54,9 @@ android {
 
             resValue "string",
                     "obtainium_app_url",
-                    "https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22com.limelight.noir%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2FClassicOldSong%2Fmoonlight-android%22%2C%22author%22%3A%22ClassicOldSong%22%2C%22name%22%3A%22Artemis%22%2C%22additionalSettings%22%3A%22%7B%5C%22apkFilterRegEx%5C%22%3A%5C%22nonRoot%5C%22%2C%5C%22matchGroutToUse%5C%22%3A%5C%22%241%5C%22%2C%5C%22versionExtractionRegEx%5C%22%3A%5C%22v(.%2B)%5C%22%7D%22%7D"
+                    "data:text/html;base64,PGgxPkFydGVtaXMgQnVmZmVyZWQ8L2gxPjxwPkF1dG9tYXRpYyB1cGRhdGVzIGFyZSBkaXNhYmxlZCBmb3IgdGhpcyBjdXN0b20gYnVpbGQuPC9wPg=="
 
-            applicationId "com.limelight"
+            applicationId "io.github.artemisbuffered"
             dimension "root"
             buildConfigField "boolean", "ROOT_BUILD", "false"
         }
@@ -95,10 +95,10 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix ".noirdebug"
-            resValue "string", "app_label", "Diana"
-            resValue "string", "app_label_root", "Diana (Root)"
-            resValue "string", "app_label_game", "Diana (Game)"
+            applicationIdSuffix ".debug"
+            resValue "string", "app_label", "Artemis Buffered (Debug)"
+            resValue "string", "app_label_root", "Artemis Buffered Root (Debug)"
+            resValue "string", "app_label_game", "Artemis Buffered Game (Debug)"
 
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
@@ -134,10 +134,13 @@ android {
             // is to please change the applicationId before you publish.
             //
             // TL;DR: Leave the following line alone!
-            applicationIdSuffix ".noir"
-            resValue "string", "app_label", "Artemis"
-            resValue "string", "app_label_root", "Artemis (Root)"
-            resValue "string", "app_label_game", "Artemis (Game)"
+            resValue "string", "app_label", "Artemis Buffered"
+            resValue "string", "app_label_root", "Artemis Buffered (Root)"
+            resValue "string", "app_label_game", "Artemis Buffered (Game)"
+
+            // This custom sideload build uses the local debug key. It deliberately has a
+            // separate application ID, so it cannot replace or share state with Artemis.
+            signingConfig signingConfigs.debug
 
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
@@ -152,6 +155,15 @@ android {
 
     testOptions {
         unitTests.includeAndroidResources = true
+    }
+
+    splits {
+        abi {
+            enable true
+            reset()
+            include "x86", "x86_64", "armeabi-v7a", "arm64-v8a"
+            universalApk true
+        }
     }
 }
 

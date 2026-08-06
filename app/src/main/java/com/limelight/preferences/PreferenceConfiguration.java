@@ -60,6 +60,7 @@ public class PreferenceConfiguration {
     private static final String SMALL_ICONS_PREF_STRING = "checkbox_small_icon_mode";
     private static final String MULTI_CONTROLLER_PREF_STRING = "checkbox_multi_controller";
     static final String AUDIO_CONFIG_PREF_STRING = "list_audio_config";
+    static final String AUDIO_BUFFER_PREF_STRING = "list_audio_buffer_ms";
     private static final String USB_DRIVER_PREF_SRING = "checkbox_usb_driver";
     private static final String VIDEO_FORMAT_PREF_STRING = "video_format";
     private static final String ONSCREEN_CONTROLLER_PREF_STRING = "checkbox_show_onscreen_controls";
@@ -171,6 +172,7 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_FLIP_FACE_BUTTONS = false;
     private static final boolean DEFAULT_TOUCHSCREEN_TRACKPAD = true;
     private static final String DEFAULT_AUDIO_CONFIG = "2"; // Stereo
+    private static final int DEFAULT_AUDIO_BUFFER_MS = 40;
     private static final boolean DEFAULT_LATENCY_TOAST = false;
     private static final String DEFAULT_FRAME_PACING = "latency";
     private static final boolean DEFAULT_ABSOLUTE_MOUSE_MODE = false;
@@ -345,6 +347,7 @@ public class PreferenceConfiguration {
     public int vibrateFallbackToDeviceStrength;
     public boolean touchscreenTrackpad;
     public MoonBridge.AudioConfiguration audioConfiguration;
+    public int audioBufferMs;
     public int framePacing;
     public boolean absoluteMouseMode;
     public boolean enableAudioFx;
@@ -377,6 +380,9 @@ public class PreferenceConfiguration {
             return false;
         }
         else if (width == 1920 && height == 1080) {
+            return false;
+        }
+        else if (width == 2158 && height == 1440) {
             return false;
         }
         else if (width == 2560 && height == 1440) {
@@ -445,6 +451,15 @@ public class PreferenceConfiguration {
 
     private static int getHeightFromResolutionString(String resString) {
         return Integer.parseInt(resString.split("x")[1]);
+    }
+
+    static int parseAudioBufferMs(String value) {
+        try {
+            return Math.max(0, Math.min(500, Integer.parseInt(value)));
+        }
+        catch (NumberFormatException e) {
+            return DEFAULT_AUDIO_BUFFER_MS;
+        }
     }
 
     private static String getResolutionString(int width, int height) {
@@ -819,6 +834,9 @@ public class PreferenceConfiguration {
         else /* if (audioConfig.equals("2")) */ {
             config.audioConfiguration = MoonBridge.AUDIO_CONFIGURATION_STEREO;
         }
+
+        config.audioBufferMs = parseAudioBufferMs(prefs.getString(AUDIO_BUFFER_PREF_STRING,
+                Integer.toString(DEFAULT_AUDIO_BUFFER_MS)));
 
         config.videoScaleMode = getVideoScaleMode(context);
 

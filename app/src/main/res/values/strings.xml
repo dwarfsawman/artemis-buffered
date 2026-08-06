@@ -215,6 +215,11 @@
     <string name="category_audio_settings">Audio Settings</string>
     <string name="title_audio_config_list">Surround sound configuration</string>
     <string name="summary_audio_config_list">Enable 5.1 or 7.1 surround sound for home-theater systems</string>
+    <string name="title_audio_buffer_list">Audio jitter buffer</string>
+    <string name="summary_audio_buffer_list">Prebuffer decoded audio to absorb network and scheduling jitter. Larger values reduce stuttering but add fixed audio latency.</string>
+    <string name="audio_buffer_disabled">Disabled (lowest latency)</string>
+    <string name="audio_buffer_recommended">40 ms (recommended)</string>
+    <string name="audio_buffer_diagnostic">200 ms (diagnostic)</string>
     <string name="title_checkbox_enable_audiofx">Enable system equalizer support</string>
     <string name="summary_checkbox_enable_audiofx">Allows audio effects to function while streaming, but may increase audio latency</string>
 
@@ -329,6 +334,7 @@
     <string name="resolution_480p">480p</string>
     <string name="resolution_720p">720p</string>
     <string name="resolution_1080p">1080p</string>
+    <string name="resolution_2158_1440">2158 × 1440</string>
     <string name="resolution_1440p">1440p</string>
     <string name="resolution_4k">4K</string>
 

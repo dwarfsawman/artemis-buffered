@@ -227,6 +227,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private TextView performanceOverlayBig;
 
     private MediaCodecDecoderRenderer decoderRenderer;
+    private AndroidAudioRenderer audioRenderer;
     private boolean reportedCrash;
 
     private WifiManager.WifiLock highPerfWifiLock;
@@ -1580,6 +1581,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     protected void onDestroy() {
+        if (audioRenderer != null) {
+            audioRenderer.shutdownNow();
+        }
+
         super.onDestroy();
 
         instance = null;
@@ -3336,6 +3341,12 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             connecting = connected = false;
             updatePipAutoEnter();
 
+            // Release the local audio route synchronously. Network teardown remains asynchronous,
+            // but the next app cannot overlap this app's AAudio/AudioTrack output.
+            if (audioRenderer != null) {
+                audioRenderer.shutdownNow();
+            }
+
             controllerHandler.stop();
 
             // Update GameManager state to indicate we're no longer in game
@@ -3679,8 +3690,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             UiHelper.notifyStreamConnecting(Game.this);
 
             decoderRenderer.setRenderTarget(holder.getSurface());
-            conn.start(new AndroidAudioRenderer(Game.this, prefConfig.enableAudioFx),
-                    decoderRenderer, Game.this);
+            audioRenderer = new AndroidAudioRenderer(Game.this, prefConfig.enableAudioFx,
+                    prefConfig.audioBufferMs);
+            conn.start(audioRenderer, decoderRenderer, Game.this);
         }
 
         panZoomHandler.handleSurfaceChange();

@@ -38,3 +38,6 @@
 # jMDNS
 -dontwarn javax.jmdns.impl.DNSCache
 -dontwarn org.slf4j.**
+-keepclasseswithmembernames class com.limelight.binding.audio.AndroidAudioRenderer {
+    native <methods>;
+}

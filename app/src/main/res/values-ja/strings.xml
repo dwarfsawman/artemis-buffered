@@ -80,6 +80,11 @@
     <string name="title_checkbox_disable_warnings">警告を無効化</string>
     <string name="summary_checkbox_disable_warnings">ストリーミング中に画面に警告メッセージを表示しない</string>
     <string name="category_audio_settings">音声</string>
+    <string name="title_audio_buffer_list">音声ジッターバッファ</string>
+    <string name="summary_audio_buffer_list">デコード済み音声を先に蓄え、通信や端末処理の揺らぎを吸収します。大きい値ほど途切れにくくなりますが、固定の音声遅延が増えます。</string>
+    <string name="audio_buffer_disabled">無効（最小遅延）</string>
+    <string name="audio_buffer_recommended">40 ms（推奨）</string>
+    <string name="audio_buffer_diagnostic">200 ms（診断用）</string>
     <string name="title_checkbox_multi_controller">複数のゲームコントローラ</string>
     <string name="summary_checkbox_multi_controller">チェックを外すと、全てのゲームコントローラが単一の物として認識されます</string>
     <string name="title_seekbar_deadzone">アナログゲームコントローラのデッドゾーン</string>

@@ -38,6 +38,7 @@ LOCAL_SRC_FILES := moonlight-common-c/src/AudioStream.c \
                    moonlight-common-c/enet/protocol.c \
                    moonlight-common-c/enet/unix.c \
                    moonlight-common-c/enet/win32.c \
+                   aaudio_renderer.c \
                    simplejni.c \
                    callbacks.c \
                    minisdl.c \
@@ -53,7 +54,7 @@ ifeq ($(NDK_DEBUG),1)
 LOCAL_CFLAGS += -DLC_DEBUG
 endif
 
-LOCAL_LDLIBS := -llog
+LOCAL_LDLIBS := -llog -ldl
 
 LOCAL_STATIC_LIBRARIES := libopus libssl libcrypto cpufeatures
 LOCAL_LDFLAGS += -Wl,--exclude-libs,ALL

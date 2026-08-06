@@ -5,6 +5,7 @@
         <item>@string/resolution_480p</item>
         <item>@string/resolution_720p</item>
         <item>@string/resolution_1080p</item>
+        <item>@string/resolution_2158_1440</item>
         <item>@string/resolution_1440p</item>
         <item>@string/resolution_4k</item>
     </string-array>
@@ -15,6 +16,7 @@
         <item>854x480</item>
         <item>1280x720</item>
         <item>1920x1080</item>
+        <item>2158x1440</item>
         <item>2560x1440</item>
         <item>3840x2160</item>
     </string-array>
@@ -52,6 +54,23 @@
         <item>2</item>
         <item>51</item>
         <item>71</item>
+    </string-array>
+
+    <string-array name="audio_buffer_names">
+        <item>@string/audio_buffer_disabled</item>
+        <item>20 ms</item>
+        <item>@string/audio_buffer_recommended</item>
+        <item>80 ms</item>
+        <item>120 ms</item>
+        <item>@string/audio_buffer_diagnostic</item>
+    </string-array>
+    <string-array name="audio_buffer_values" translatable="false">
+        <item>0</item>
+        <item>20</item>
+        <item>40</item>
+        <item>80</item>
+        <item>120</item>
+        <item>200</item>
     </string-array>
 
     <!-- Don't forget to update locales_config.xml when you modify this! -->
