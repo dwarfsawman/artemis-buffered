@@ -72,6 +72,7 @@ public class PreferenceConfiguration {
     private static final String ENABLE_PERF_OVERLAY_STRING = "checkbox_enable_perf_overlay";
     private static final String ENABLE_PERF_LOGGING = "checkbox_enable_perf_logging";
     public static final String ENABLE_AUDIO_DIAGNOSTICS_PREF_STRING = "checkbox_enable_audio_diagnostics";
+    public static final String ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING = "checkbox_enable_callback_audio_buffer";
     public static final String ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING = "checkbox_enable_adaptive_audio_buffer";
     private static final String BIND_ALL_USB_STRING = "checkbox_usb_bind_all";
     private static final String MOUSE_EMULATION_STRING = "checkbox_mouse_emulation";
@@ -163,6 +164,7 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_PERF_OVERLAY_BOTTOM = false;
     private static final boolean DEFAULT_ENABLE_PERF_LOGGING = false;
     private static final boolean DEFAULT_ENABLE_AUDIO_DIAGNOSTICS = false;
+    private static final boolean DEFAULT_ENABLE_CALLBACK_AUDIO_BUFFER = false;
     private static final boolean DEFAULT_ENABLE_ADAPTIVE_AUDIO_BUFFER = false;
     private static final boolean DEFAULT_BIND_ALL_USB = false;
     private static final boolean DEFAULT_MOUSE_EMULATION = true;
@@ -259,6 +261,7 @@ public class PreferenceConfiguration {
     public boolean enablePerfOverlay;
     public boolean enablePerfLogging;
     public boolean enableAudioDiagnostics;
+    public boolean enableCallbackAudioBuffer;
     public boolean enableAdaptiveAudioBuffer;
     //简化版性能信息
     public boolean enablePerfOverlayLite;
@@ -892,6 +895,7 @@ public class PreferenceConfiguration {
         config.enablePerfOverlay = prefs.getBoolean(ENABLE_PERF_OVERLAY_STRING, DEFAULT_ENABLE_PERF_OVERLAY);
         config.enablePerfLogging = prefs.getBoolean(ENABLE_PERF_LOGGING, DEFAULT_ENABLE_PERF_LOGGING);
         config.enableAudioDiagnostics = isAudioDiagnosticsEnabled(prefs);
+        config.enableCallbackAudioBuffer = isCallbackAudioBufferEnabled(prefs);
         config.enableAdaptiveAudioBuffer = isAdaptiveAudioBufferEnabled(prefs);
         config.enablePerfOverlayLite = prefs.getBoolean("checkbox_enable_perf_overlay_lite",DEFAULT_ENABLE_PERF_OVERLAY);
         config.enablePerfOverlayBottom = prefs.getBoolean("checkbox_enable_perf_overlay_bottom",DEFAULT_PERF_OVERLAY_BOTTOM);
@@ -1008,8 +1012,14 @@ public class PreferenceConfiguration {
                 DEFAULT_ENABLE_AUDIO_DIAGNOSTICS);
     }
 
+    static boolean isCallbackAudioBufferEnabled(SharedPreferences prefs) {
+        return prefs.getBoolean(ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING,
+                DEFAULT_ENABLE_CALLBACK_AUDIO_BUFFER);
+    }
+
     static boolean isAdaptiveAudioBufferEnabled(SharedPreferences prefs) {
-        return prefs.getBoolean(ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING,
+        return isCallbackAudioBufferEnabled(prefs) &&
+                prefs.getBoolean(ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING,
                 DEFAULT_ENABLE_ADAPTIVE_AUDIO_BUFFER);
     }
 }

@@ -188,8 +188,10 @@
     <string name="summary_checkbox_enable_audio_diagnostics">直近8回のストリーミングについて、音声バッファ、ジッター、アンダーラン、破棄、書き込みエラーを時刻付きで記録します。共有するまでログは端末内だけに保存されます。</string>
     <string name="category_artemis_buffered_settings">Artemis Buffered（固有設定）</string>
     <string name="summary_category_artemis_buffered_settings">オレンジ色の項目はこのビルド固有の設定です</string>
+    <string name="title_checkbox_enable_callback_audio_buffer">固定40 msコールバック音声バッファ</string>
+    <string name="summary_checkbox_enable_callback_audio_buffer">オフ（既定）：このリポジトリのクローン時と同じAudioTrack動作。オン：Android 8.1以降でAAudioコールバック＋固定40 ms SPSCリングを使用し、下の適応設定を有効にします。音声エフェクト有効時はAudioTrackを使用します。</string>
     <string name="title_checkbox_enable_adaptive_audio_buffer">適応20～80 ms＋WSOLA型処理</string>
-    <string name="summary_checkbox_enable_adaptive_audio_buffer">オフ（既定）：AAudioコールバック＋SPSCリングを固定40 ms、WSOLAなし。オン：適応20～80 ms＋WSOLA型の時間伸縮。どちらもアンダーラン後の再バッファリングは行いません。Android 8.1以降のみ（音声エフェクト有効時はAudioTrackを使用）。</string>
+    <string name="summary_checkbox_enable_adaptive_audio_buffer">上の固定コールバック音声バッファを有効にすると設定できます。オフ：固定40 ms、WSOLAなし。オン：適応20～80 ms＋WSOLA型の時間伸縮。どちらもアンダーラン後の再バッファリングは行いません。</string>
     <string name="title_share_audio_diagnostic_logs">音声診断ログを共有</string>
     <string name="summary_share_audio_diagnostic_logs">最近の音声セッションログを分析用のZIPファイルとして書き出します</string>
     <string name="toast_no_audio_diagnostic_logs">音声診断ログはまだ記録されていません</string>

@@ -13,6 +13,14 @@
 
         <com.limelight.preferences.ArtemisSwitchPreference
             android:defaultValue="false"
+            android:key="checkbox_enable_callback_audio_buffer"
+            android:summary="@string/summary_checkbox_enable_callback_audio_buffer"
+            android:title="@string/title_checkbox_enable_callback_audio_buffer"
+            app:iconSpaceReserved="false" />
+
+        <com.limelight.preferences.ArtemisSwitchPreference
+            android:defaultValue="false"
+            android:dependency="checkbox_enable_callback_audio_buffer"
             android:key="checkbox_enable_adaptive_audio_buffer"
             android:summary="@string/summary_checkbox_enable_adaptive_audio_buffer"
             android:title="@string/title_checkbox_enable_adaptive_audio_buffer"

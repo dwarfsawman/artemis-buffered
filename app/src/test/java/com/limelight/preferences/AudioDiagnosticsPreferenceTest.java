@@ -32,15 +32,33 @@ public class AudioDiagnosticsPreferenceTest {
     }
 
     @Test
-    public void fixedAudioBufferIsDefaultAndAdaptiveModeIsOptIn() {
+    public void originalAudioTrackIsDefaultAndCallbackBufferIsOptIn() {
         Context context = ApplicationProvider.getApplicationContext();
         SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
         preferences.edit().clear().commit();
 
+        assertFalse(PreferenceConfiguration.isCallbackAudioBufferEnabled(preferences));
         assertFalse(PreferenceConfiguration.isAdaptiveAudioBufferEnabled(preferences));
 
         preferences.edit()
+                .putBoolean(PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING, true)
+                .commit();
+        assertTrue(PreferenceConfiguration.isCallbackAudioBufferEnabled(preferences));
+        assertFalse(PreferenceConfiguration.isAdaptiveAudioBufferEnabled(preferences));
+    }
+
+    @Test
+    public void adaptiveModeRequiresCallbackBuffer() {
+        Context context = ApplicationProvider.getApplicationContext();
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        preferences.edit().clear()
                 .putBoolean(PreferenceConfiguration.ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING, true)
+                .commit();
+
+        assertFalse(PreferenceConfiguration.isAdaptiveAudioBufferEnabled(preferences));
+
+        preferences.edit()
+                .putBoolean(PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING, true)
                 .commit();
         assertTrue(PreferenceConfiguration.isAdaptiveAudioBufferEnabled(preferences));
     }

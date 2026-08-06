@@ -68,11 +68,36 @@ public class ArtemisSettingsAppearanceTest {
 
         assertEquals("category_artemis_buffered_settings", firstCategoryKey);
         assertEquals("com.limelight.preferences.ArtemisSwitchPreference",
+                customTags.get(PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING));
+        assertEquals("com.limelight.preferences.ArtemisSwitchPreference",
                 customTags.get(PreferenceConfiguration.ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING));
         assertEquals("com.limelight.preferences.ArtemisSwitchPreference",
                 customTags.get(PreferenceConfiguration.ENABLE_AUDIO_DIAGNOSTICS_PREF_STRING));
         assertEquals("com.limelight.preferences.ArtemisPreference",
                 customTags.get("share_audio_diagnostic_logs"));
+    }
+
+    @Test
+    public void adaptiveBufferDependsOnCallbackBuffer() throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+
+        try (XmlResourceParser parser = context.getResources().getXml(R.xml.preferences)) {
+            int event;
+            while ((event = parser.next()) != XmlPullParser.END_DOCUMENT) {
+                if (event != XmlPullParser.START_TAG) {
+                    continue;
+                }
+
+                String key = parser.getAttributeValue(ANDROID_NS, "key");
+                if (PreferenceConfiguration.ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING.equals(key)) {
+                    assertEquals(PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING,
+                            parser.getAttributeValue(ANDROID_NS, "dependency"));
+                    return;
+                }
+            }
+        }
+
+        throw new AssertionError("Adaptive audio buffer preference was not found");
     }
 
     @Test
