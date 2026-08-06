@@ -39,15 +39,30 @@ typedef struct {
     aaudio_result_t (*streamRequestStop)(AAudioStream* stream);
     aaudio_result_t (*streamClose)(AAudioStream* stream);
     aaudio_result_t (*streamSetBufferSizeInFrames)(AAudioStream* stream, int32_t numFrames);
+    aaudio_stream_state_t (*streamGetState)(AAudioStream* stream);
+    int32_t (*streamGetBufferSizeInFrames)(AAudioStream* stream);
+    int32_t (*streamGetBufferCapacityInFrames)(AAudioStream* stream);
     int32_t (*streamGetFramesPerBurst)(AAudioStream* stream);
     int32_t (*streamGetXRunCount)(AAudioStream* stream);
     int32_t (*streamGetSampleRate)(AAudioStream* stream);
     int32_t (*streamGetChannelCount)(AAudioStream* stream);
     aaudio_format_t (*streamGetFormat)(AAudioStream* stream);
     aaudio_performance_mode_t (*streamGetPerformanceMode)(AAudioStream* stream);
+    aaudio_sharing_mode_t (*streamGetSharingMode)(AAudioStream* stream);
     const char* (*convertResultToText)(aaudio_result_t result);
     bool ready;
 } AAudioApi;
+
+#define DIAGNOSTIC_EVENT_CAPACITY 128
+#define DIAGNOSTIC_EVENT_VALUE_COUNT 7
+#define DIAGNOSTIC_EVENT_WORDS (2 + DIAGNOSTIC_EVENT_VALUE_COUNT)
+
+typedef struct {
+    atomic_uint publishedSequence;
+    int32_t type;
+    int64_t elapsedRealtimeNanos;
+    int64_t values[DIAGNOSTIC_EVENT_VALUE_COUNT];
+} AudioDiagnosticEvent;
 
 typedef struct {
     AAudioStream* stream;
@@ -60,6 +75,12 @@ typedef struct {
     int32_t sampleRate;
     int32_t channelCount;
     bool adaptive;
+    bool diagnosticsEnabled;
+    int32_t framesPerBurst;
+    int32_t bufferSizeFrames;
+    int32_t bufferCapacityFrames;
+    int32_t performanceMode;
+    int32_t sharingMode;
     int64_t lastArrivalNs;
     int64_t lastTargetDecreaseNs;
     int64_t protectionUntilNs;
@@ -79,6 +100,17 @@ typedef struct {
     atomic_int jitterMicros;
     atomic_llong timeStretchFrameDelta;
     atomic_int lastError;
+    atomic_int streamState;
+    atomic_ullong armTimeNs;
+    atomic_ullong startRequestTimeNs;
+    atomic_ullong firstCallbackTimeNs;
+    int64_t lastCallbackTimeNs;
+    atomic_uint callbackCount;
+    atomic_uint maxCallbackGapMicros;
+    atomic_uint diagnosticEventsDropped;
+    atomic_uint diagnosticEventWriteSequence;
+    atomic_uint diagnosticEventReadSequence;
+    AudioDiagnosticEvent diagnosticEvents[DIAGNOSTIC_EVENT_CAPACITY];
 } AAudioRenderer;
 
 enum {
@@ -91,6 +123,15 @@ enum {
     RATE_ONE_PPM = 1000000,
     RATE_MIN_PPM = 970000,
     RATE_MAX_PPM = 1030000,
+    DIAGNOSTIC_EVENT_STREAM_OPENED = 1,
+    DIAGNOSTIC_EVENT_ARMED = 2,
+    DIAGNOSTIC_EVENT_START_REQUESTED = 3,
+    DIAGNOSTIC_EVENT_FIRST_CALLBACK = 4,
+    DIAGNOSTIC_EVENT_UNDERRUN = 5,
+    DIAGNOSTIC_EVENT_RING_OVERFLOW = 6,
+    DIAGNOSTIC_EVENT_START_FAILED = 7,
+    DIAGNOSTIC_EVENT_STREAM_ERROR = 8,
+    NATIVE_STATS_COUNT = 20,
 };
 
 static AAudioApi gApi;
@@ -133,12 +174,16 @@ static void loadAAudioApi(void) {
     LOAD_REQUIRED(streamRequestStop, "AAudioStream_requestStop");
     LOAD_REQUIRED(streamClose, "AAudioStream_close");
     LOAD_REQUIRED(streamSetBufferSizeInFrames, "AAudioStream_setBufferSizeInFrames");
+    LOAD_REQUIRED(streamGetState, "AAudioStream_getState");
+    LOAD_REQUIRED(streamGetBufferSizeInFrames, "AAudioStream_getBufferSizeInFrames");
+    LOAD_REQUIRED(streamGetBufferCapacityInFrames, "AAudioStream_getBufferCapacityInFrames");
     LOAD_REQUIRED(streamGetFramesPerBurst, "AAudioStream_getFramesPerBurst");
     LOAD_REQUIRED(streamGetXRunCount, "AAudioStream_getXRunCount");
     LOAD_REQUIRED(streamGetSampleRate, "AAudioStream_getSampleRate");
     LOAD_REQUIRED(streamGetChannelCount, "AAudioStream_getChannelCount");
     LOAD_REQUIRED(streamGetFormat, "AAudioStream_getFormat");
     LOAD_REQUIRED(streamGetPerformanceMode, "AAudioStream_getPerformanceMode");
+    LOAD_REQUIRED(streamGetSharingMode, "AAudioStream_getSharingMode");
     LOAD_REQUIRED(convertResultToText, "AAudio_convertResultToText");
 
     // Usage and content type were added in API 28. AAudio itself is available from API 26.
@@ -158,6 +203,74 @@ static int64_t monotonicTimeNs(void) {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     return (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec;
+}
+
+// Matches android.os.SystemClock.elapsedRealtimeNanos(), including time spent suspended.
+static int64_t elapsedRealtimeNs(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_BOOTTIME, &now);
+    return (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec;
+}
+
+static void updateAtomicMaximum(atomic_uint* maximum, uint32_t value) {
+    uint32_t observed = atomic_load_explicit(maximum, memory_order_relaxed);
+    while (value > observed &&
+           !atomic_compare_exchange_weak_explicit(maximum,
+                                                  &observed,
+                                                  value,
+                                                  memory_order_relaxed,
+                                                  memory_order_relaxed)) {
+    }
+}
+
+static void enqueueDiagnosticEvent(AAudioRenderer* renderer,
+                                   int32_t type,
+                                   int64_t eventElapsedRealtimeNanos,
+                                   int64_t value0,
+                                   int64_t value1,
+                                   int64_t value2,
+                                   int64_t value3,
+                                   int64_t value4,
+                                   int64_t value5,
+                                   int64_t value6) {
+    if (!renderer->diagnosticsEnabled) {
+        return;
+    }
+
+    uint32_t writeSequence = atomic_load_explicit(
+            &renderer->diagnosticEventWriteSequence, memory_order_relaxed);
+    for (;;) {
+        uint32_t readSequence = atomic_load_explicit(
+                &renderer->diagnosticEventReadSequence, memory_order_acquire);
+        if ((uint32_t)(writeSequence - readSequence) >= DIAGNOSTIC_EVENT_CAPACITY) {
+            atomic_fetch_add_explicit(&renderer->diagnosticEventsDropped, 1,
+                                      memory_order_relaxed);
+            return;
+        }
+
+        if (atomic_compare_exchange_weak_explicit(
+                    &renderer->diagnosticEventWriteSequence,
+                    &writeSequence,
+                    writeSequence + 1,
+                    memory_order_acq_rel,
+                    memory_order_relaxed)) {
+            break;
+        }
+    }
+
+    AudioDiagnosticEvent* event =
+            &renderer->diagnosticEvents[writeSequence % DIAGNOSTIC_EVENT_CAPACITY];
+    event->type = type;
+    event->elapsedRealtimeNanos = eventElapsedRealtimeNanos;
+    event->values[0] = value0;
+    event->values[1] = value1;
+    event->values[2] = value2;
+    event->values[3] = value3;
+    event->values[4] = value4;
+    event->values[5] = value5;
+    event->values[6] = value6;
+    atomic_store_explicit(&event->publishedSequence, writeSequence + 1,
+                          memory_order_release);
 }
 
 static uint32_t framesForMs(const AAudioRenderer* renderer, uint32_t milliseconds) {
@@ -234,6 +347,55 @@ static aaudio_data_callback_result_t dataCallback(AAudioStream* stream, void* us
     uint32_t availableFrames = writeFrame - readFrame;
     uint32_t requestedFrames = (uint32_t)numFrames;
     uint32_t copiedFrames = availableFrames < requestedFrames ? availableFrames : requestedFrames;
+    int64_t callbackTimeNs = 0;
+    uint32_t callbackGapMicros = 0;
+    uint32_t callbackNumber = 0;
+
+    if (renderer->diagnosticsEnabled) {
+        callbackTimeNs = elapsedRealtimeNs();
+        if (renderer->lastCallbackTimeNs > 0) {
+            int64_t gapMicros = (callbackTimeNs - renderer->lastCallbackTimeNs) / 1000;
+            if (gapMicros > UINT32_MAX) {
+                gapMicros = UINT32_MAX;
+            }
+            if (gapMicros > 0) {
+                callbackGapMicros = (uint32_t)gapMicros;
+                updateAtomicMaximum(&renderer->maxCallbackGapMicros, callbackGapMicros);
+            }
+        }
+        renderer->lastCallbackTimeNs = callbackTimeNs;
+        callbackNumber = atomic_fetch_add_explicit(&renderer->callbackCount, 1,
+                                                   memory_order_relaxed) + 1;
+
+        unsigned long long expectedFirstCallback = 0;
+        if (atomic_compare_exchange_strong_explicit(
+                    &renderer->firstCallbackTimeNs,
+                    &expectedFirstCallback,
+                    (unsigned long long)callbackTimeNs,
+                    memory_order_acq_rel,
+                    memory_order_relaxed)) {
+            unsigned long long startRequestTimeNs = atomic_load_explicit(
+                    &renderer->startRequestTimeNs, memory_order_acquire);
+            unsigned long long armTimeNs = atomic_load_explicit(
+                    &renderer->armTimeNs, memory_order_acquire);
+            int64_t requestDelayMicros = startRequestTimeNs == 0 ? -1 :
+                    (callbackTimeNs - (int64_t)startRequestTimeNs) / 1000;
+            int64_t armDelayMicros = armTimeNs == 0 ? -1 :
+                    (callbackTimeNs - (int64_t)armTimeNs) / 1000;
+            atomic_store_explicit(&renderer->streamState, AAUDIO_STREAM_STATE_STARTED,
+                                  memory_order_release);
+            enqueueDiagnosticEvent(renderer,
+                                   DIAGNOSTIC_EVENT_FIRST_CALLBACK,
+                                   callbackTimeNs,
+                                   requestedFrames,
+                                   availableFrames,
+                                   requestDelayMicros,
+                                   armDelayMicros,
+                                   callbackNumber,
+                                   AAUDIO_STREAM_STATE_STARTED,
+                                   0);
+        }
+    }
 
     if (copiedFrames > 0) {
         copyFromRing(renderer, output, readFrame, copiedFrames);
@@ -245,8 +407,21 @@ static aaudio_data_callback_result_t dataCallback(AAudioStream* stream, void* us
         memset(output + (size_t)copiedFrames * renderer->channelCount,
                0,
                (size_t)missingFrames * renderer->channelCount * sizeof(int16_t));
-        atomic_fetch_add_explicit(&renderer->underrunCallbacks, 1, memory_order_relaxed);
+        uint32_t totalUnderrunCallbacks = atomic_fetch_add_explicit(
+                &renderer->underrunCallbacks, 1, memory_order_relaxed) + 1;
         atomic_fetch_add_explicit(&renderer->underrunFrames, missingFrames, memory_order_relaxed);
+        enqueueDiagnosticEvent(renderer,
+                               DIAGNOSTIC_EVENT_UNDERRUN,
+                               callbackTimeNs,
+                               availableFrames,
+                               requestedFrames,
+                               missingFrames,
+                               atomic_load_explicit(&renderer->targetFrames,
+                                                    memory_order_relaxed),
+                               callbackGapMicros,
+                               totalUnderrunCallbacks,
+                               atomic_load_explicit(&renderer->streamState,
+                                                    memory_order_relaxed));
     }
 
     return AAUDIO_CALLBACK_RESULT_CONTINUE;
@@ -257,6 +432,14 @@ static void errorCallback(AAudioStream* stream, void* userData, aaudio_result_t 
     AAudioRenderer* renderer = (AAudioRenderer*)userData;
     if (renderer != NULL) {
         atomic_store_explicit(&renderer->lastError, error, memory_order_release);
+        atomic_store_explicit(&renderer->streamState, AAUDIO_STREAM_STATE_DISCONNECTED,
+                              memory_order_release);
+        enqueueDiagnosticEvent(renderer,
+                               DIAGNOSTIC_EVENT_STREAM_ERROR,
+                               renderer->diagnosticsEnabled ? elapsedRealtimeNs() : 0,
+                               error,
+                               AAUDIO_STREAM_STATE_DISCONNECTED,
+                               0, 0, 0, 0, 0);
     }
     LOGE("AAudio stream error: %d (%s)", error, resultText(error));
 }
@@ -280,10 +463,40 @@ static void maybeStart(AAudioRenderer* renderer) {
         return;
     }
 
+    int64_t requestTimeNs = renderer->diagnosticsEnabled ? elapsedRealtimeNs() : 0;
+    if (renderer->diagnosticsEnabled) {
+        atomic_store_explicit(&renderer->startRequestTimeNs,
+                              (unsigned long long)requestTimeNs,
+                              memory_order_release);
+    }
+    atomic_store_explicit(&renderer->streamState, AAUDIO_STREAM_STATE_STARTING,
+                          memory_order_release);
+    enqueueDiagnosticEvent(renderer,
+                           DIAGNOSTIC_EVENT_START_REQUESTED,
+                           requestTimeNs,
+                           writeFrame - readFrame,
+                           targetFrames,
+                           renderer->framesPerBurst,
+                           renderer->bufferSizeFrames,
+                           AAUDIO_STREAM_STATE_STARTING,
+                           0,
+                           0);
+
     aaudio_result_t result = gApi.streamRequestStart(renderer->stream);
     if (result != AAUDIO_OK) {
         atomic_store_explicit(&renderer->started, false, memory_order_release);
         atomic_store_explicit(&renderer->lastError, result, memory_order_release);
+        atomic_store_explicit(&renderer->streamState, gApi.streamGetState(renderer->stream),
+                              memory_order_release);
+        enqueueDiagnosticEvent(renderer,
+                               DIAGNOSTIC_EVENT_START_FAILED,
+                               renderer->diagnosticsEnabled ? elapsedRealtimeNs() : 0,
+                               result,
+                               writeFrame - readFrame,
+                               targetFrames,
+                               atomic_load_explicit(&renderer->streamState,
+                                                    memory_order_relaxed),
+                               0, 0, 0);
         LOGE("AAudio start failed: %d (%s)", result, resultText(result));
     }
     else {
@@ -544,9 +757,21 @@ static uint32_t writeFrames(AAudioRenderer* renderer, const int16_t* samples, ui
     }
 
     if (acceptedFrames < adjustedFrames) {
+        uint32_t droppedFrames = adjustedFrames - acceptedFrames;
         atomic_fetch_add_explicit(&renderer->droppedFrames,
-                                  adjustedFrames - acceptedFrames,
+                                  droppedFrames,
                                   memory_order_relaxed);
+        enqueueDiagnosticEvent(renderer,
+                               DIAGNOSTIC_EVENT_RING_OVERFLOW,
+                               renderer->diagnosticsEnabled ? elapsedRealtimeNs() : 0,
+                               frames,
+                               adjustedFrames,
+                               acceptedFrames,
+                               droppedFrames,
+                               queuedFrames,
+                               renderer->capacityFrames,
+                               atomic_load_explicit(&renderer->started,
+                                                    memory_order_relaxed));
     }
 
     maybeStart(renderer);
@@ -586,7 +811,7 @@ static void destroyRenderer(AAudioRenderer* renderer) {
 JNIEXPORT jlong JNICALL
 Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
         JNIEnv* env, jclass clazz, jint sampleRate, jint channelCount,
-        jint samplesPerFrame, jboolean adaptive) {
+        jint samplesPerFrame, jboolean adaptive, jboolean diagnosticsEnabled) {
     (void)env;
     (void)clazz;
 
@@ -604,6 +829,7 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
     renderer->sampleRate = sampleRate;
     renderer->channelCount = channelCount;
     renderer->adaptive = adaptive == JNI_TRUE;
+    renderer->diagnosticsEnabled = diagnosticsEnabled == JNI_TRUE;
     renderer->minTargetFrames = framesForMs(renderer,
             renderer->adaptive ? MIN_TARGET_MS : FIXED_TARGET_MS);
     renderer->maxTargetFrames = framesForMs(renderer,
@@ -648,6 +874,18 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
     atomic_init(&renderer->jitterMicros, 0);
     atomic_init(&renderer->timeStretchFrameDelta, 0);
     atomic_init(&renderer->lastError, AAUDIO_OK);
+    atomic_init(&renderer->streamState, AAUDIO_STREAM_STATE_UNINITIALIZED);
+    atomic_init(&renderer->armTimeNs, 0);
+    atomic_init(&renderer->startRequestTimeNs, 0);
+    atomic_init(&renderer->firstCallbackTimeNs, 0);
+    atomic_init(&renderer->callbackCount, 0);
+    atomic_init(&renderer->maxCallbackGapMicros, 0);
+    atomic_init(&renderer->diagnosticEventsDropped, 0);
+    atomic_init(&renderer->diagnosticEventWriteSequence, 0);
+    atomic_init(&renderer->diagnosticEventReadSequence, 0);
+    for (uint32_t i = 0; i < DIAGNOSTIC_EVENT_CAPACITY; i++) {
+        atomic_init(&renderer->diagnosticEvents[i].publishedSequence, 0);
+    }
 
     AAudioStreamBuilder* builder = NULL;
     aaudio_result_t result = gApi.createStreamBuilder(&builder);
@@ -679,6 +917,8 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
         destroyRenderer(renderer);
         return 0;
     }
+    atomic_store_explicit(&renderer->streamState, gApi.streamGetState(renderer->stream),
+                          memory_order_release);
 
     int32_t actualSampleRate = gApi.streamGetSampleRate(renderer->stream);
     int32_t actualChannelCount = gApi.streamGetChannelCount(renderer->stream);
@@ -691,20 +931,36 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
         return 0;
     }
 
-    int32_t framesPerBurst = gApi.streamGetFramesPerBurst(renderer->stream);
-    if (framesPerBurst > 0) {
+    renderer->framesPerBurst = gApi.streamGetFramesPerBurst(renderer->stream);
+    if (renderer->framesPerBurst > 0) {
         aaudio_result_t bufferResult =
-                gApi.streamSetBufferSizeInFrames(renderer->stream, framesPerBurst * 2);
+                gApi.streamSetBufferSizeInFrames(renderer->stream,
+                                                 renderer->framesPerBurst * 2);
         if (bufferResult < 0) {
             LOGW("Unable to set two-burst AAudio buffer: %d (%s)",
                  bufferResult, resultText(bufferResult));
         }
     }
+    renderer->bufferSizeFrames = gApi.streamGetBufferSizeInFrames(renderer->stream);
+    renderer->bufferCapacityFrames = gApi.streamGetBufferCapacityInFrames(renderer->stream);
+    renderer->performanceMode = gApi.streamGetPerformanceMode(renderer->stream);
+    renderer->sharingMode = gApi.streamGetSharingMode(renderer->stream);
+
+    enqueueDiagnosticEvent(renderer,
+                           DIAGNOSTIC_EVENT_STREAM_OPENED,
+                           renderer->diagnosticsEnabled ? elapsedRealtimeNs() : 0,
+                           sampleRate,
+                           channelCount,
+                           renderer->framesPerBurst,
+                           renderer->bufferSizeFrames,
+                           renderer->bufferCapacityFrames,
+                           renderer->performanceMode,
+                           renderer->sharingMode);
 
     LOGI("AAudio opened: %d Hz, %d channels, target=%s, initial=40 ms, capacity=%u frames, burst=%d, mode=%d",
          sampleRate, channelCount, renderer->adaptive ? "20-80 ms adaptive" : "40 ms fixed",
-         renderer->capacityFrames, framesPerBurst,
-         gApi.streamGetPerformanceMode(renderer->stream));
+         renderer->capacityFrames, renderer->framesPerBurst,
+         renderer->performanceMode);
     return (jlong)(intptr_t)renderer;
 }
 
@@ -718,7 +974,24 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeArm(
         return;
     }
 
+    int64_t armTimeNs = renderer->diagnosticsEnabled ? elapsedRealtimeNs() : 0;
+    if (renderer->diagnosticsEnabled) {
+        atomic_store_explicit(&renderer->armTimeNs,
+                              (unsigned long long)armTimeNs,
+                              memory_order_release);
+    }
     atomic_store_explicit(&renderer->armed, true, memory_order_release);
+    uint32_t readFrame = atomic_load_explicit(&renderer->readFrame, memory_order_acquire);
+    uint32_t writeFrame = atomic_load_explicit(&renderer->writeFrame, memory_order_acquire);
+    enqueueDiagnosticEvent(renderer,
+                           DIAGNOSTIC_EVENT_ARMED,
+                           armTimeNs,
+                           writeFrame - readFrame,
+                           atomic_load_explicit(&renderer->targetFrames,
+                                                memory_order_relaxed),
+                           atomic_load_explicit(&renderer->streamState,
+                                                memory_order_relaxed),
+                           0, 0, 0, 0);
     maybeStart(renderer);
 }
 
@@ -753,13 +1026,16 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeGetStats(
         JNIEnv* env, jclass clazz, jlong handle, jlongArray stats) {
     (void)clazz;
     AAudioRenderer* renderer = (AAudioRenderer*)(intptr_t)handle;
-    if (renderer == NULL || stats == NULL || (*env)->GetArrayLength(env, stats) < 11) {
+    if (renderer == NULL || stats == NULL ||
+        (*env)->GetArrayLength(env, stats) < NATIVE_STATS_COUNT) {
         return;
     }
 
     uint32_t readFrame = atomic_load_explicit(&renderer->readFrame, memory_order_acquire);
     uint32_t writeFrame = atomic_load_explicit(&renderer->writeFrame, memory_order_acquire);
-    jlong values[11] = {
+    aaudio_stream_state_t streamState = gApi.streamGetState(renderer->stream);
+    atomic_store_explicit(&renderer->streamState, streamState, memory_order_release);
+    jlong values[NATIVE_STATS_COUNT] = {
             (jlong)(writeFrame - readFrame),
             (jlong)atomic_load_explicit(&renderer->underrunCallbacks, memory_order_relaxed),
             (jlong)atomic_load_explicit(&renderer->underrunFrames, memory_order_relaxed),
@@ -771,8 +1047,71 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeGetStats(
             (jlong)atomic_load_explicit(&renderer->jitterMicros, memory_order_relaxed),
             (jlong)atomic_load_explicit(&renderer->timeStretchFrameDelta, memory_order_relaxed),
             (jlong)atomic_load_explicit(&renderer->started, memory_order_acquire),
+            (jlong)atomic_load_explicit(&renderer->callbackCount, memory_order_relaxed),
+            (jlong)atomic_load_explicit(&renderer->diagnosticEventsDropped,
+                                        memory_order_relaxed),
+            (jlong)atomic_load_explicit(&renderer->maxCallbackGapMicros,
+                                        memory_order_relaxed),
+            (jlong)renderer->capacityFrames,
+            (jlong)renderer->framesPerBurst,
+            (jlong)renderer->bufferSizeFrames,
+            (jlong)renderer->bufferCapacityFrames,
+            (jlong)streamState,
+            (jlong)atomic_load_explicit(&renderer->armed, memory_order_acquire),
     };
-    (*env)->SetLongArrayRegion(env, stats, 0, 11, values);
+    (*env)->SetLongArrayRegion(env, stats, 0, NATIVE_STATS_COUNT, values);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeDrainDiagnosticEvents(
+        JNIEnv* env, jclass clazz, jlong handle, jlongArray output) {
+    (void)clazz;
+    AAudioRenderer* renderer = (AAudioRenderer*)(intptr_t)handle;
+    if (renderer == NULL || output == NULL) {
+        return 0;
+    }
+
+    jsize outputLength = (*env)->GetArrayLength(env, output);
+    uint32_t outputCapacity = (uint32_t)(outputLength / DIAGNOSTIC_EVENT_WORDS);
+    if (outputCapacity == 0) {
+        return 0;
+    }
+
+    jlong* values = (*env)->GetLongArrayElements(env, output, NULL);
+    if (values == NULL) {
+        return 0;
+    }
+
+    uint32_t readSequence = atomic_load_explicit(
+            &renderer->diagnosticEventReadSequence, memory_order_relaxed);
+    uint32_t writeSequence = atomic_load_explicit(
+            &renderer->diagnosticEventWriteSequence, memory_order_acquire);
+    uint32_t eventCount = 0;
+    while (readSequence != writeSequence && eventCount < outputCapacity) {
+        AudioDiagnosticEvent* event =
+                &renderer->diagnosticEvents[readSequence % DIAGNOSTIC_EVENT_CAPACITY];
+        uint32_t publishedSequence = atomic_load_explicit(
+                &event->publishedSequence, memory_order_acquire);
+        if (publishedSequence != readSequence + 1) {
+            // A producer reserved this position but has not published it yet.
+            break;
+        }
+
+        size_t outputOffset = (size_t)eventCount * DIAGNOSTIC_EVENT_WORDS;
+        values[outputOffset] = event->type;
+        values[outputOffset + 1] = event->elapsedRealtimeNanos;
+        for (uint32_t i = 0; i < DIAGNOSTIC_EVENT_VALUE_COUNT; i++) {
+            values[outputOffset + 2 + i] = event->values[i];
+        }
+
+        readSequence++;
+        eventCount++;
+    }
+
+    atomic_store_explicit(&renderer->diagnosticEventReadSequence, readSequence,
+                          memory_order_release);
+    (*env)->ReleaseLongArrayElements(env, output, values, 0);
+    return (jint)eventCount;
 }
 
 JNIEXPORT void JNICALL

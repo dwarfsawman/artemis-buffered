@@ -5,6 +5,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
+import android.os.SystemClock;
 
 import androidx.test.core.app.ApplicationProvider;
 
@@ -60,6 +61,31 @@ public class AudioDiagnosticsLoggerTest {
         try (ZipFile zip = new ZipFile(archive)) {
             assertNotNull(zip.getEntry(logs[0].getName()));
         }
+    }
+
+    @Test
+    public void preservesElapsedRealtimeForDeferredNativeEvents() throws Exception {
+        AudioDiagnosticsLogger logger = AudioDiagnosticsLogger.start(context);
+        assertNotNull(logger);
+
+        long eventElapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos();
+        logger.recordAtElapsedRealtimeNanos("aaudio_underrun",
+                eventElapsedRealtimeNanos,
+                "missingFrames", 192);
+        logger.close("test_complete");
+        assertTrue(logger.awaitWriterForTest(2000));
+
+        File directory = new File(context.getFilesDir(), "audio-diagnostics");
+        File[] logs = directory.listFiles();
+        assertNotNull(logs);
+        assertEquals(1, logs.length);
+
+        List<JSONObject> records = readRecords(logs[0]);
+        assertEquals("aaudio_underrun", records.get(1).getString("event"));
+        assertEquals(eventElapsedRealtimeNanos,
+                records.get(1).getLong("elapsedRealtimeNanos"));
+        assertEquals(192, records.get(1).getInt("missingFrames"));
+        assertTrue(records.get(1).getLong("sessionElapsedMs") >= 0);
     }
 
     private static List<JSONObject> readRecords(File file) throws Exception {

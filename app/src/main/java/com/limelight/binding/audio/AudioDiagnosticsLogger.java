@@ -12,6 +12,7 @@ import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -44,17 +45,19 @@ public final class AudioDiagnosticsLogger {
     private static final int MAX_SESSION_LOGS = 8;
 
     private final File logFile;
-    private final long sessionStartElapsedMs;
+    private final long sessionStartElapsedNanos;
     private final ExecutorService writer = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "AudioDiagnosticsWriter");
         thread.setDaemon(true);
         return thread;
     });
     private final AtomicBoolean closed = new AtomicBoolean();
+    // Accessed only by the single writer executor thread.
+    private BufferedWriter output;
 
     private AudioDiagnosticsLogger(File logFile) {
         this.logFile = logFile;
-        this.sessionStartElapsedMs = SystemClock.elapsedRealtime();
+        this.sessionStartElapsedNanos = SystemClock.elapsedRealtimeNanos();
     }
 
     /** Returns null if diagnostics cannot be started. Streaming must continue in that case. */
@@ -87,7 +90,25 @@ public final class AudioDiagnosticsLogger {
             return;
         }
 
-        enqueue(buildRecord(event, fields));
+        enqueueRecord(event,
+                System.currentTimeMillis(),
+                SystemClock.elapsedRealtimeNanos(),
+                fields,
+                false);
+    }
+
+    /** Records an event captured against Android's elapsed-realtime clock. */
+    void recordAtElapsedRealtimeNanos(String event, long eventElapsedNanos, Object... fields) {
+        if (closed.get()) {
+            return;
+        }
+
+        long nowElapsedNanos = SystemClock.elapsedRealtimeNanos();
+        long boundedElapsedNanos = Math.max(sessionStartElapsedNanos,
+                Math.min(eventElapsedNanos, nowElapsedNanos));
+        long eventWallTimeMs = System.currentTimeMillis() -
+                (nowElapsedNanos - boundedElapsedNanos) / 1_000_000L;
+        enqueueRecord(event, eventWallTimeMs, boundedElapsedNanos, fields, false);
     }
 
     public void close(String reason) {
@@ -95,15 +116,21 @@ public final class AudioDiagnosticsLogger {
             return;
         }
 
-        enqueue(buildRecord("session_end", "reason", reason));
+        enqueueRecord("session_end",
+                System.currentTimeMillis(),
+                SystemClock.elapsedRealtimeNanos(),
+                new Object[] {"reason", reason},
+                true);
         writer.shutdown();
     }
 
-    private String buildRecord(String event, Object... fields) {
+    private String buildRecord(String event, long wallTimeMs, long elapsedNanos, Object... fields) {
         JSONObject record = new JSONObject();
         try {
-            record.put("timestamp", isoTimestamp(System.currentTimeMillis()));
-            record.put("sessionElapsedMs", SystemClock.elapsedRealtime() - sessionStartElapsedMs);
+            record.put("timestamp", isoTimestamp(wallTimeMs));
+            record.put("sessionElapsedMs",
+                    Math.max(0, elapsedNanos - sessionStartElapsedNanos) / 1_000_000L);
+            record.put("elapsedRealtimeNanos", elapsedNanos);
             record.put("event", event);
 
             if (fields.length % 2 != 0) {
@@ -119,9 +146,15 @@ public final class AudioDiagnosticsLogger {
         return record + System.lineSeparator();
     }
 
-    private void enqueue(String line) {
+    private void enqueueRecord(String event, long wallTimeMs, long elapsedNanos,
+                               Object[] fields, boolean closeOutputAfterWrite) {
         try {
-            writer.execute(() -> append(line));
+            writer.execute(() -> {
+                append(buildRecord(event, wallTimeMs, elapsedNanos, fields));
+                if (closeOutputAfterWrite) {
+                    closeOutput();
+                }
+            });
         }
         catch (RejectedExecutionException ignored) {
             // A late renderer callback can race with shutdown. The session is already complete.
@@ -129,12 +162,32 @@ public final class AudioDiagnosticsLogger {
     }
 
     private void append(String line) {
-        try (OutputStreamWriter output = new OutputStreamWriter(
-                new FileOutputStream(logFile, true), StandardCharsets.UTF_8)) {
+        try {
+            if (output == null) {
+                output = new BufferedWriter(new OutputStreamWriter(
+                        new FileOutputStream(logFile, true), StandardCharsets.UTF_8));
+            }
             output.write(line);
+            output.flush();
         }
         catch (IOException e) {
             LimeLog.warning("Unable to write audio diagnostics: " + e.getMessage());
+        }
+    }
+
+    private void closeOutput() {
+        if (output == null) {
+            return;
+        }
+
+        try {
+            output.close();
+        }
+        catch (IOException e) {
+            LimeLog.warning("Unable to close audio diagnostics: " + e.getMessage());
+        }
+        finally {
+            output = null;
         }
     }
 
