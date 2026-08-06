@@ -436,6 +436,14 @@
     <string name="summary_checkbox_enable_perf_overlay_lite">Display simplified performance information: Network Speed / Latency / Decode / Packet Loss Rate / FPS</string>
     <string name="title_checkbox_enable_perf_logging">Enable Performance Logging</string>
     <string name="summary_checkbox_enable_perf_logging">"Stores performance data per configuration. (Offline only) "</string>
+    <string name="title_checkbox_enable_audio_diagnostics">Audio diagnostic logging</string>
+    <string name="summary_checkbox_enable_audio_diagnostics">Record timestamped audio buffer, jitter, underrun, drop, and write-error data for the 8 most recent streaming sessions. Logs stay on this device until shared.</string>
+    <string name="title_share_audio_diagnostic_logs">Share audio diagnostic logs</string>
+    <string name="summary_share_audio_diagnostic_logs">Export recent audio session logs as a ZIP file for analysis</string>
+    <string name="toast_no_audio_diagnostic_logs">No audio diagnostic logs have been recorded yet</string>
+    <string name="toast_audio_diagnostics_export_failed">Could not export audio diagnostic logs</string>
+    <string name="audio_diagnostics_chooser_title">Share audio diagnostic logs</string>
+    <string name="audio_diagnostics_share_subject">Artemis Buffered audio diagnostic logs</string>
     <string name="title_checkbox_enable_perf_overlay_lite_dialog">Lite mode click to pop up quick options</string>
     <string name="summary_checkbox_enable_perf_overlay_lite_dialog">Replace the back button logic, pop up the game quick menu.</string>
     <string name="title_show_overlay_zoom_toggle_button">Show overlay zoom toggle button</string>

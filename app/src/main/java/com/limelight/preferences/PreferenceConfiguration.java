@@ -71,6 +71,7 @@ public class PreferenceConfiguration {
     private static final String ENABLE_PIP_PREF_STRING = "checkbox_enable_pip";
     private static final String ENABLE_PERF_OVERLAY_STRING = "checkbox_enable_perf_overlay";
     private static final String ENABLE_PERF_LOGGING = "checkbox_enable_perf_logging";
+    public static final String ENABLE_AUDIO_DIAGNOSTICS_PREF_STRING = "checkbox_enable_audio_diagnostics";
     private static final String BIND_ALL_USB_STRING = "checkbox_usb_bind_all";
     private static final String MOUSE_EMULATION_STRING = "checkbox_mouse_emulation";
     private static final String ANALOG_SCROLLING_PREF_STRING = "analog_scrolling";
@@ -160,6 +161,7 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_ENABLE_PERF_OVERLAY = false;
     private static final boolean DEFAULT_PERF_OVERLAY_BOTTOM = false;
     private static final boolean DEFAULT_ENABLE_PERF_LOGGING = false;
+    private static final boolean DEFAULT_ENABLE_AUDIO_DIAGNOSTICS = false;
     private static final boolean DEFAULT_BIND_ALL_USB = false;
     private static final boolean DEFAULT_MOUSE_EMULATION = true;
     private static final String DEFAULT_ANALOG_STICK_FOR_SCROLLING = "right";
@@ -254,6 +256,7 @@ public class PreferenceConfiguration {
     public boolean enablePip;
     public boolean enablePerfOverlay;
     public boolean enablePerfLogging;
+    public boolean enableAudioDiagnostics;
     //简化版性能信息
     public boolean enablePerfOverlayLite;
 
@@ -885,6 +888,7 @@ public class PreferenceConfiguration {
         config.enablePip = prefs.getBoolean(ENABLE_PIP_PREF_STRING, DEFAULT_ENABLE_PIP);
         config.enablePerfOverlay = prefs.getBoolean(ENABLE_PERF_OVERLAY_STRING, DEFAULT_ENABLE_PERF_OVERLAY);
         config.enablePerfLogging = prefs.getBoolean(ENABLE_PERF_LOGGING, DEFAULT_ENABLE_PERF_LOGGING);
+        config.enableAudioDiagnostics = isAudioDiagnosticsEnabled(prefs);
         config.enablePerfOverlayLite = prefs.getBoolean("checkbox_enable_perf_overlay_lite",DEFAULT_ENABLE_PERF_OVERLAY);
         config.enablePerfOverlayBottom = prefs.getBoolean("checkbox_enable_perf_overlay_bottom",DEFAULT_PERF_OVERLAY_BOTTOM);
         config.bindAllUsb = prefs.getBoolean(BIND_ALL_USB_STRING, DEFAULT_BIND_ALL_USB);
@@ -993,5 +997,10 @@ public class PreferenceConfiguration {
         config.panOffsetY = prefs.getFloat(NUMBER_PAN_OFFSET_Y, DEFAULT_PAN_OFFSET);
 
         return config;
+    }
+
+    static boolean isAudioDiagnosticsEnabled(SharedPreferences prefs) {
+        return prefs.getBoolean(ENABLE_AUDIO_DIAGNOSTICS_PREF_STRING,
+                DEFAULT_ENABLE_AUDIO_DIAGNOSTICS);
     }
 }

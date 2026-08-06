@@ -23,6 +23,7 @@ public class AndroidAudioRenderer implements AudioRenderer {
 
     private final Context context;
     private final boolean enableAudioFx;
+    private final AudioDiagnosticsLogger diagnostics;
     private final long[] nativeStats = new long[11];
 
     private AudioTrack track;
@@ -32,10 +33,16 @@ public class AndroidAudioRenderer implements AudioRenderer {
     private boolean audioFxSessionOpened;
     private boolean closing;
     private long nextStatsLogTimeMs;
+    private long lastDeliveryTimeMs;
+    private long lastDeliveryGapLogTimeMs;
+    private long deliveryGapEvents;
+    private long fallbackDroppedPackets;
 
-    public AndroidAudioRenderer(Context context, boolean enableAudioFx) {
+    public AndroidAudioRenderer(Context context, boolean enableAudioFx,
+                                boolean enableAudioDiagnostics) {
         this.context = context;
         this.enableAudioFx = enableAudioFx;
+        this.diagnostics = enableAudioDiagnostics ? AudioDiagnosticsLogger.start(context) : null;
     }
 
     private static native long nativeCreate(int sampleRate, int channelCount, int samplesPerFrame,
@@ -86,6 +93,11 @@ public class AndroidAudioRenderer implements AudioRenderer {
         this.sampleRate = sampleRate;
         this.channelCount = audioConfiguration.channelCount;
         this.closing = false;
+        recordDiagnostic("audio_setup",
+                "sampleRate", sampleRate,
+                "channelCount", channelCount,
+                "samplesPerFrame", samplesPerFrame,
+                "audioFxEnabled", enableAudioFx);
 
         // AAudio uses a high-priority callback to consume a separate PCM jitter ring.
         // Audio effects require an AudioTrack session, so preserve the legacy path for that case.
@@ -94,9 +106,16 @@ public class AndroidAudioRenderer implements AudioRenderer {
             if (nativeRenderer != 0) {
                 LimeLog.info("Using adaptive callback AAudio renderer: 20-80 ms target, " +
                         "initial=40 ms, WSOLA rate=0.97-1.03, no underrun rebuffering");
+                recordDiagnostic("renderer_started",
+                        "renderer", "AAudio",
+                        "adaptive", true,
+                        "initialTargetMs", 40,
+                        "minimumTargetMs", 20,
+                        "maximumTargetMs", 80);
                 return 0;
             }
             LimeLog.warning("AAudio renderer unavailable; falling back to low-latency AudioTrack");
+            recordDiagnostic("aaudio_unavailable");
         }
 
         return setupAudioTrack(audioConfiguration, sampleRate, samplesPerFrame);
@@ -153,6 +172,11 @@ public class AndroidAudioRenderer implements AudioRenderer {
                 track = createAudioTrack(channelConfig, sampleRate, bufferSize, lowLatency);
                 LimeLog.info("AudioTrack fallback configuration: " + bufferSize +
                         " bytes, lowLatency=" + lowLatency);
+                recordDiagnostic("renderer_started",
+                        "renderer", "AudioTrack",
+                        "bufferBytes", bufferSize,
+                        "lowLatency", lowLatency,
+                        "channelConfig", String.format("0x%X", channelConfig));
                 return 0;
             }
             catch (Exception e) {
@@ -177,10 +201,16 @@ public class AndroidAudioRenderer implements AudioRenderer {
             return;
         }
 
+        recordDeliveryTiming(audioData.length);
+
         if (nativeRenderer != 0) {
             int acceptedFrames = nativeWrite(nativeRenderer, audioData);
             if (acceptedFrames < 0) {
                 LimeLog.warning("AAudio ring write failed with code " + acceptedFrames);
+                recordDiagnostic("write_error",
+                        "renderer", "AAudio",
+                        "code", acceptedFrames,
+                        "requestedFrames", channelCount == 0 ? 0 : audioData.length / channelCount);
             }
             maybeLogNativeStats();
             return;
@@ -197,15 +227,21 @@ public class AndroidAudioRenderer implements AudioRenderer {
                 int written = track.write(audioData, offset, audioData.length - offset);
                 if (written <= 0) {
                     LimeLog.warning("AudioTrack write failed with code " + written);
+                    recordDiagnostic("write_error",
+                            "renderer", "AudioTrack",
+                            "code", written,
+                            "remainingSamples", audioData.length - offset);
                     break;
                 }
                 offset += written;
             }
         }
         else {
+            fallbackDroppedPackets++;
             LimeLog.warning("Too much pending fallback audio data: " +
                     MoonBridge.getPendingAudioDuration() + " ms");
         }
+        maybeLogAudioTrackStats();
     }
 
     private void maybeLogNativeStats() {
@@ -222,6 +258,19 @@ public class AndroidAudioRenderer implements AudioRenderer {
         long targetMs = sampleRate == 0 ? 40 : nativeStats[6] * 1000 / sampleRate;
         double playbackRate = nativeStats[7] / 1_000_000.0;
         double jitterMs = nativeStats[8] / 1_000.0;
+        recordDiagnostic("aaudio_stats",
+                "queuedMs", queuedMs,
+                "targetMs", targetMs,
+                "playbackRate", playbackRate,
+                "jitterMs", jitterMs,
+                "underrunCallbacks", nativeStats[1],
+                "underrunMs", underrunMs,
+                "droppedMs", droppedMs,
+                "stretchDeltaFrames", nativeStats[9],
+                "xrunCount", nativeStats[4],
+                "lastError", nativeStats[5],
+                "started", nativeStats[10] != 0,
+                "deliveryGapEvents", deliveryGapEvents);
         LimeLog.info("AAudio jitter stats: queued=" + queuedMs +
                 " ms, target=" + targetMs +
                 " ms, rate=" + String.format("%.3f", playbackRate) +
@@ -232,6 +281,59 @@ public class AndroidAudioRenderer implements AudioRenderer {
                 " ms, stretchDeltaFrames=" + nativeStats[9] +
                 ", xrun=" + nativeStats[4] +
                 ", error=" + nativeStats[5]);
+    }
+
+    private void maybeLogAudioTrackStats() {
+        if (diagnostics == null || track == null) {
+            return;
+        }
+
+        long now = SystemClock.elapsedRealtime();
+        if (now < nextStatsLogTimeMs) {
+            return;
+        }
+        nextStatsLogTimeMs = now + STATS_LOG_INTERVAL_MS;
+
+        int underrunCount = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N ?
+                track.getUnderrunCount() : -1;
+        recordDiagnostic("audiotrack_stats",
+                "pendingDecoderAudioMs", MoonBridge.getPendingAudioDuration(),
+                "underrunCount", underrunCount,
+                "playState", track.getPlayState(),
+                "fallbackDroppedPackets", fallbackDroppedPackets,
+                "deliveryGapEvents", deliveryGapEvents);
+    }
+
+    private void recordDeliveryTiming(int sampleCount) {
+        if (diagnostics == null || sampleRate == 0 || channelCount == 0) {
+            return;
+        }
+
+        long now = SystemClock.elapsedRealtime();
+        long expectedMs = Math.max(1, (long) sampleCount * 1000 / sampleRate / channelCount);
+        long gapMs = lastDeliveryTimeMs == 0 ? 0 : now - lastDeliveryTimeMs;
+        lastDeliveryTimeMs = now;
+
+        long thresholdMs = Math.max(50, expectedMs * 3);
+        if (gapMs <= thresholdMs) {
+            return;
+        }
+
+        deliveryGapEvents++;
+        if (now - lastDeliveryGapLogTimeMs >= 1000) {
+            lastDeliveryGapLogTimeMs = now;
+            recordDiagnostic("delivery_gap",
+                    "gapMs", gapMs,
+                    "expectedPacketDurationMs", expectedMs,
+                    "thresholdMs", thresholdMs,
+                    "totalDeliveryGapEvents", deliveryGapEvents);
+        }
+    }
+
+    private void recordDiagnostic(String event, Object... fields) {
+        if (diagnostics != null) {
+            diagnostics.record(event, fields);
+        }
     }
 
     @Override
@@ -287,12 +389,17 @@ public class AndroidAudioRenderer implements AudioRenderer {
         }
 
         if (nativeRenderer != 0) {
+            // Capture one final snapshot even if the normal interval has not elapsed.
+            nextStatsLogTimeMs = 0;
+            maybeLogNativeStats();
             long handle = nativeRenderer;
             nativeRenderer = 0;
             nativeDestroy(handle);
         }
 
         if (track != null) {
+            nextStatsLogTimeMs = 0;
+            maybeLogAudioTrackStats();
             try {
                 if (track.getPlayState() == AudioTrack.PLAYSTATE_PLAYING) {
                     track.pause();
@@ -306,6 +413,10 @@ public class AndroidAudioRenderer implements AudioRenderer {
                 track.release();
                 track = null;
             }
+        }
+
+        if (diagnostics != null) {
+            diagnostics.close("renderer_shutdown");
         }
     }
 }

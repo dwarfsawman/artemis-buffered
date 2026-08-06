@@ -55,6 +55,7 @@ import com.limelight.GameMenu;
 import com.limelight.LimeLog;
 import com.limelight.PcView;
 import com.limelight.R;
+import com.limelight.binding.audio.AudioDiagnosticsLogger;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardControllerConfigurationLoader;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.utils.Dialog;
@@ -833,6 +834,41 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
                         }
                         return false;
                     }
+                });
+            }
+
+            _pref = findPreference("share_audio_diagnostic_logs");
+            if (_pref != null) {
+                _pref.setOnPreferenceClickListener(preference -> {
+                    Context context = preference.getContext();
+                    try {
+                        File archive = AudioDiagnosticsLogger.createShareArchive(context);
+                        if (archive == null) {
+                            Toast.makeText(context,
+                                    R.string.toast_no_audio_diagnostic_logs,
+                                    Toast.LENGTH_SHORT).show();
+                            return true;
+                        }
+
+                        Uri archiveUri = FileProvider.getUriForFile(context,
+                                context.getPackageName() + ".fileprovider",
+                                archive);
+                        Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                        shareIntent.setType("application/zip");
+                        shareIntent.putExtra(Intent.EXTRA_SUBJECT,
+                                context.getString(R.string.audio_diagnostics_share_subject));
+                        shareIntent.putExtra(Intent.EXTRA_STREAM, archiveUri);
+                        shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        context.startActivity(Intent.createChooser(shareIntent,
+                                context.getString(R.string.audio_diagnostics_chooser_title)));
+                    }
+                    catch (IOException | android.content.ActivityNotFoundException e) {
+                        LimeLog.warning("Unable to share audio diagnostic logs: " + e.getMessage());
+                        Toast.makeText(context,
+                                R.string.toast_audio_diagnostics_export_failed,
+                                Toast.LENGTH_SHORT).show();
+                    }
+                    return true;
                 });
             }
 

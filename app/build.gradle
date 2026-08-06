@@ -11,8 +11,8 @@ android {
         minSdk 21
         targetSdk 34
 
-        versionName "20.2.6-buffered.2"
-        versionCode = 5802
+        versionName "20.2.6-buffered.3"
+        versionCode = 5803
 
         // Generate native debug symbols to allow Google Play to symbolicate our native crashes
         ndk.debugSymbolLevel = 'FULL'
@@ -138,8 +138,9 @@ android {
             resValue "string", "app_label_root", "Artemis Buffered (Root)"
             resValue "string", "app_label_game", "Artemis Buffered (Game)"
 
-            // This custom sideload build uses the local debug key. It deliberately has a
-            // separate application ID, so it cannot replace or share state with Artemis.
+            // Keep the sideload signing identity stable so a newer APK can update an
+            // existing Artemis Buffered install and preserve its settings and pairing data.
+            // The separate application ID prevents it from replacing the upstream app.
             signingConfig signingConfigs.debug
 
             minifyEnabled true
