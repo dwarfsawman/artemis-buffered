@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="artemisBufferedPreferenceAccent">#FFAB91</color>
+    <color name="artemisBufferedPreferenceBackground">#FFA73312</color>
+    <color name="artemisBufferedPreferenceText">#FFFFFFFF</color>
+    <color name="artemisBufferedPreferenceSummary">#FFFFD8CC</color>
 </resources>

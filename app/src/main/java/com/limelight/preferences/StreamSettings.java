@@ -17,7 +17,6 @@ import android.os.Vibrator;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.fragment.app.DialogFragment;
 import androidx.preference.CheckBoxPreference;
@@ -35,10 +34,7 @@ import com.bytehamster.lib.preferencesearch.SearchPreference;
 import com.bytehamster.lib.preferencesearch.SearchPreferenceResultListener;
 import android.text.InputFilter;
 import android.text.InputType;
-import android.text.SpannableString;
-import android.text.Spanned;
 import android.text.TextUtils;
-import android.text.style.ForegroundColorSpan;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.Range;
@@ -357,18 +353,6 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
         public void initializePreferences() {
             addPreferencesFromResource(R.xml.preferences);
             PreferenceScreen screen = getPreferenceScreen();
-
-            applyArtemisPreferenceAccent();
-
-            // The callback AAudio renderer is available beginning with Android 8.1.
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) {
-                PreferenceCategory category = findPreference("category_artemis_buffered_settings");
-                Preference adaptiveBuffer = findPreference(
-                        PreferenceConfiguration.ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING);
-                if (category != null && adaptiveBuffer != null) {
-                    category.removePreference(adaptiveBuffer);
-                }
-            }
 
             AppCompatActivity activity = (AppCompatActivity) requireActivity();
             PackageManager pm = activity.getPackageManager();
@@ -1024,29 +1008,6 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
                         return false;
                     }
                 });
-            }
-        }
-
-        private void applyArtemisPreferenceAccent() {
-            int accentColor = ContextCompat.getColor(requireContext(),
-                    R.color.artemisBufferedPreferenceAccent);
-            String[] preferenceKeys = {
-                    "category_artemis_buffered_settings",
-                    PreferenceConfiguration.ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING,
-                    PreferenceConfiguration.ENABLE_AUDIO_DIAGNOSTICS_PREF_STRING,
-                    "share_audio_diagnostic_logs",
-            };
-
-            for (String preferenceKey : preferenceKeys) {
-                Preference preference = findPreference(preferenceKey);
-                if (preference == null || preference.getTitle() == null) {
-                    continue;
-                }
-
-                SpannableString title = new SpannableString(preference.getTitle());
-                title.setSpan(new ForegroundColorSpan(accentColor), 0, title.length(),
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                preference.setTitle(title);
             }
         }
 

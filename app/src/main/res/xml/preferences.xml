@@ -5,6 +5,33 @@
     app:iconSpaceReserved="false">
     <com.bytehamster.lib.preferencesearch.SearchPreference android:key="searchPreference" />
 
+    <com.limelight.preferences.ArtemisPreferenceCategory
+        android:key="category_artemis_buffered_settings"
+        android:summary="@string/summary_category_artemis_buffered_settings"
+        android:title="@string/category_artemis_buffered_settings"
+        app:iconSpaceReserved="false">
+
+        <com.limelight.preferences.ArtemisSwitchPreference
+            android:defaultValue="false"
+            android:key="checkbox_enable_adaptive_audio_buffer"
+            android:summary="@string/summary_checkbox_enable_adaptive_audio_buffer"
+            android:title="@string/title_checkbox_enable_adaptive_audio_buffer"
+            app:iconSpaceReserved="false" />
+
+        <com.limelight.preferences.ArtemisSwitchPreference
+            android:defaultValue="false"
+            android:key="checkbox_enable_audio_diagnostics"
+            android:summary="@string/summary_checkbox_enable_audio_diagnostics"
+            android:title="@string/title_checkbox_enable_audio_diagnostics"
+            app:iconSpaceReserved="false" />
+
+        <com.limelight.preferences.ArtemisPreference
+            android:key="share_audio_diagnostic_logs"
+            android:summary="@string/summary_share_audio_diagnostic_logs"
+            android:title="@string/title_share_audio_diagnostic_logs"
+            app:iconSpaceReserved="false" />
+    </com.limelight.preferences.ArtemisPreferenceCategory>
+
     <PreferenceCategory
         android:key="category_video_settings"
         android:title="@string/category_video_settings"
@@ -185,32 +212,6 @@
             android:key="checkbox_enable_audiofx"
             android:summary="@string/summary_checkbox_enable_audiofx"
             android:title="@string/title_checkbox_enable_audiofx"
-            app:iconSpaceReserved="false" />
-    </PreferenceCategory>
-
-    <PreferenceCategory
-        android:key="category_artemis_buffered_settings"
-        android:title="@string/category_artemis_buffered_settings"
-        app:iconSpaceReserved="false">
-
-        <CheckBoxPreference
-            android:defaultValue="false"
-            android:key="checkbox_enable_adaptive_audio_buffer"
-            android:summary="@string/summary_checkbox_enable_adaptive_audio_buffer"
-            android:title="@string/title_checkbox_enable_adaptive_audio_buffer"
-            app:iconSpaceReserved="false" />
-
-        <CheckBoxPreference
-            android:defaultValue="false"
-            android:key="checkbox_enable_audio_diagnostics"
-            android:summary="@string/summary_checkbox_enable_audio_diagnostics"
-            android:title="@string/title_checkbox_enable_audio_diagnostics"
-            app:iconSpaceReserved="false" />
-
-        <Preference
-            android:key="share_audio_diagnostic_logs"
-            android:summary="@string/summary_share_audio_diagnostic_logs"
-            android:title="@string/title_share_audio_diagnostic_logs"
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
 

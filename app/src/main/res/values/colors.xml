@@ -2,4 +2,7 @@
 <resources>
     <color name="profileAccent">#FF4081</color>
     <color name="artemisBufferedPreferenceAccent">#B93815</color>
+    <color name="artemisBufferedPreferenceBackground">#FFB93815</color>
+    <color name="artemisBufferedPreferenceText">#FFFFFFFF</color>
+    <color name="artemisBufferedPreferenceSummary">#FFFFE0D6</color>
 </resources>
