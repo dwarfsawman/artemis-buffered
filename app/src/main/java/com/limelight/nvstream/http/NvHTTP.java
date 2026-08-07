@@ -49,7 +49,6 @@ import com.limelight.LimeLog;
 import com.limelight.nvstream.ConnectionContext;
 import com.limelight.nvstream.http.PairingManager.PairState;
 import com.limelight.nvstream.jni.MoonBridge;
-import com.limelight.utils.DeviceUtils;
 
 import okhttp3.ConnectionPool;
 import okhttp3.HttpUrl;
@@ -62,6 +61,8 @@ import okhttp3.ResponseBody;
 
 
 public class NvHTTP {
+    private static final String DEFAULT_DEVICE_NAME = "artemis";
+
     private String uniqueId;
     private String deviceName;
     private PairingManager pm;
@@ -204,7 +205,7 @@ public class NvHTTP {
     public NvHTTP(ComputerDetails.AddressTuple address, int httpsPort, String uniqueId, X509Certificate serverCert, LimelightCryptoProvider cryptoProvider) throws IOException {
         this.uniqueId = uniqueId;
 
-        this.deviceName = DeviceUtils.getModel();
+        this.deviceName = DEFAULT_DEVICE_NAME;
 
         this.serverCert = serverCert;
 
