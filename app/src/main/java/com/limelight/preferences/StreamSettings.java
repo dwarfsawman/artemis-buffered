@@ -42,9 +42,11 @@ import android.util.Range;
 import android.view.Display;
 import android.view.DisplayCutout;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.Toast;
 
@@ -115,6 +117,65 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
         setContentView(R.layout.activity_stream_settings);
 
         UiHelper.notifyNewRootView(this);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            finishPresetNameEditingIfTouchIsOutsideCarousel(event);
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
+    private void finishPresetNameEditingIfTouchIsOutsideCarousel(MotionEvent event) {
+        View settingsRoot = findViewById(R.id.stream_settings);
+        View focusedView = settingsRoot != null ? settingsRoot.findFocus() : getCurrentFocus();
+        if (!(focusedView instanceof EditText) ||
+                focusedView.getId() != R.id.settingsPresetName) {
+            return;
+        }
+
+        View carousel = findViewById(R.id.settingsPresetCarousel);
+        if (carousel != null) {
+            int[] carouselLocation = new int[2];
+            carousel.getLocationOnScreen(carouselLocation);
+            float touchX = event.getRawX();
+            float touchY = event.getRawY();
+            if (touchX >= carouselLocation[0] &&
+                    touchX < carouselLocation[0] + carousel.getWidth() &&
+                    touchY >= carouselLocation[1] &&
+                    touchY < carouselLocation[1] + carousel.getHeight()) {
+                return;
+            }
+        }
+
+        boolean focusMoved = false;
+        if (settingsRoot != null) {
+            settingsRoot.setFocusableInTouchMode(true);
+            if (settingsRoot instanceof ViewGroup) {
+                ViewGroup settingsGroup = (ViewGroup) settingsRoot;
+                int previousDescendantFocusability = settingsGroup.getDescendantFocusability();
+                // Prevent focus search from immediately selecting the title editor again.
+                settingsGroup.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+                try {
+                    focusMoved = settingsRoot.requestFocus();
+                }
+                finally {
+                    settingsGroup.setDescendantFocusability(previousDescendantFocusability);
+                }
+            }
+            else {
+                focusMoved = settingsRoot.requestFocus();
+            }
+        }
+        if (!focusMoved) {
+            focusedView.clearFocus();
+        }
+        InputMethodManager inputMethodManager =
+                (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (inputMethodManager != null) {
+            inputMethodManager.hideSoftInputFromWindow(focusedView.getWindowToken(), 0);
+        }
     }
 
     @Override
