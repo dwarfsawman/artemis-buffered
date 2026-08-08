@@ -22,6 +22,7 @@ import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 @Config(sdk = {33})
@@ -124,6 +125,22 @@ public class SettingsPresetControllerTest {
 
         controller.renamePreset(second, "4K TV");
         assertEquals("4K TV", second.getName());
+    }
+
+    @Test
+    public void deletingPresetRemovesItAndClearsActiveSelection() {
+        SettingsProfile preset = controller.addPreset("Temporary");
+
+        controller.deletePreset(preset);
+
+        assertTrue(controller.getPresets().isEmpty());
+        assertNull(controller.getActivePreset());
+
+        ProfilesManager.instance = null;
+        ProfilesManager reloadedManager = ProfilesManager.getInstance();
+        assertTrue(reloadedManager.load(context));
+        assertTrue(reloadedManager.getProfiles().isEmpty());
+        assertNull(reloadedManager.getActive());
     }
 
     @Test

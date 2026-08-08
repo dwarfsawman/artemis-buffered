@@ -84,6 +84,10 @@ public final class SettingsPresetController {
         profilesManager.update(profile);
     }
 
+    public void deletePreset(@NonNull SettingsProfile profile) {
+        profilesManager.delete(profile.getUuid());
+    }
+
     public boolean isActive(@NonNull SettingsProfile profile) {
         SettingsProfile active = getActivePreset();
         return active != null && active.getUuid().equals(profile.getUuid());

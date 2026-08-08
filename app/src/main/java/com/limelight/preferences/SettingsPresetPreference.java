@@ -1,5 +1,6 @@
 package com.limelight.preferences;
 
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -290,6 +291,10 @@ public final class SettingsPresetPreference extends Preference
                         reloadSettingsAfterApply();
                     }
                 });
+                card.setOnLongClickListener(view -> {
+                    showDeleteConfirmation(profile);
+                    return true;
+                });
 
                 save.setOnClickListener(view -> {
                     controller.savePreset(profile);
@@ -302,6 +307,25 @@ public final class SettingsPresetPreference extends Preference
                             Toast.LENGTH_SHORT).show();
                     reloadSettingsAfterApply();
                 });
+            }
+
+            private void showDeleteConfirmation(@NonNull SettingsProfile profile) {
+                new AlertDialog.Builder(getContext())
+                        .setTitle(R.string.settings_preset_delete_title)
+                        .setMessage(getContext().getString(
+                                R.string.settings_preset_delete_confirmation,
+                                profile.getName()))
+                        .setPositiveButton(R.string.settings_preset_delete,
+                                (dialog, which) -> {
+                                    controller.deletePreset(profile);
+                                    Toast.makeText(getContext(),
+                                            getContext().getString(
+                                                    R.string.settings_preset_deleted,
+                                                    profile.getName()),
+                                            Toast.LENGTH_SHORT).show();
+                                })
+                        .setNegativeButton(R.string.cancel, null)
+                        .show();
             }
 
             private void commitName(SettingsProfile profile) {

@@ -441,7 +441,7 @@
     <string name="category_artemis_buffered_settings">Artemis Buffered (custom settings)</string>
     <string name="summary_category_artemis_buffered_settings">Orange settings are specific to this build</string>
     <string name="settings_preset_title">Settings presets</string>
-    <string name="settings_preset_summary">Select a card to switch presets. Edit settings, then save or reset the selected card.</string>
+    <string name="settings_preset_summary">Select a card to switch presets. Edit settings, then save or reset the selected card. Long-press a card to delete it.</string>
     <string name="settings_preset_default_name">Preset %1$d</string>
     <string name="settings_preset_add">Add settings preset</string>
     <string name="settings_preset_add_short">Add</string>
@@ -458,6 +458,10 @@
     <string name="settings_preset_saved">Preset saved</string>
     <string name="settings_preset_reset_done">Changes reset</string>
     <string name="settings_preset_name_required">Preset name cannot be blank</string>
+    <string name="settings_preset_delete_title">Delete preset</string>
+    <string name="settings_preset_delete_confirmation">Delete \"%1$s\"?</string>
+    <string name="settings_preset_delete">Delete</string>
+    <string name="settings_preset_deleted">Deleted %1$s</string>
     <string name="title_checkbox_enable_callback_audio_buffer">Fixed 40 ms callback audio buffer</string>
     <string name="summary_checkbox_enable_callback_audio_buffer">Off (default): use the original AudioTrack behavior from the cloned repository. On: use the fixed 40 ms AAudio callback + SPSC ring on Android 8.1+ and enable the adaptive option below. Audio effects continue to use AudioTrack.</string>
     <string name="title_checkbox_enable_adaptive_audio_buffer">Adaptive 20–80 ms + WSOLA-style processing</string>
