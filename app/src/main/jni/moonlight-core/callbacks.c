@@ -1,17 +1,25 @@
 #include <jni.h>
 
 #include <pthread.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <Limelight.h>
+#include <Limelight-internal.h>
 
 #include <opus_multistream.h>
 #include <android/log.h>
 
 #include <cpu-features.h>
 
+#include "aaudio_renderer.h"
+
 static OpusMSDecoder* Decoder;
 static OPUS_MULTISTREAM_CONFIGURATION OpusConfig;
+static int16_t* DecodedPcmBuffer;
+static bool DirectNativeAudio;
+
+static bool hasFastAes(void);
 
 static JavaVM *JVM;
 static pthread_key_t JniEnvKey;
@@ -204,6 +212,12 @@ int BridgeArInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusCon
     JNIEnv* env = GetThreadEnv();
     int err;
 
+    Decoder = NULL;
+    DecodedPcmBuffer = NULL;
+    DecodedAudioBuffer = NULL;
+    DirectNativeAudio = false;
+    AudioCallbacks.capabilities &= ~CAPABILITY_DIRECT_SUBMIT;
+
     err = (*env)->CallStaticIntMethod(env, GlobalBridgeClass, BridgeArInitMethod, audioConfiguration, opusConfig->sampleRate, opusConfig->samplesPerFrame);
     if ((*env)->ExceptionCheck(env)) {
         // This is called on a Java thread, so it's safe to return
@@ -222,8 +236,45 @@ int BridgeArInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusCon
             return -1;
         }
 
-        // We know ahead of time what the buffer size will be for decoded audio, so pre-allocate it
-        DecodedAudioBuffer = (*env)->NewGlobalRef(env, (*env)->NewShortArray(env, opusConfig->channelCount * opusConfig->samplesPerFrame));
+        size_t decodedSampleCapacity =
+                (size_t)opusConfig->channelCount * opusConfig->samplesPerFrame;
+        DecodedPcmBuffer = (int16_t*)malloc(decodedSampleCapacity * sizeof(int16_t));
+        if (DecodedPcmBuffer == NULL) {
+            opus_multistream_decoder_destroy(Decoder);
+            Decoder = NULL;
+            (*env)->CallStaticVoidMethod(env, GlobalBridgeClass, BridgeArCleanupMethod);
+            return -1;
+        }
+
+        // If Java successfully created AAudio, decoded PCM can stay in native code all the
+        // way to the SPSC ring. AudioTrack fallback still needs one reusable Java array.
+        DirectNativeAudio = ArtemisAaudioRendererIsActive();
+        if (!DirectNativeAudio) {
+            jshortArray localBuffer = (*env)->NewShortArray(
+                    env, (jsize)decodedSampleCapacity);
+            if (localBuffer != NULL) {
+                DecodedAudioBuffer = (*env)->NewGlobalRef(env, localBuffer);
+                (*env)->DeleteLocalRef(env, localBuffer);
+            }
+            if (DecodedAudioBuffer == NULL) {
+                free(DecodedPcmBuffer);
+                DecodedPcmBuffer = NULL;
+                opus_multistream_decoder_destroy(Decoder);
+                Decoder = NULL;
+                (*env)->CallStaticVoidMethod(env, GlobalBridgeClass, BridgeArCleanupMethod);
+                return -1;
+            }
+        }
+
+        // Direct submit removes the AudioRecv -> AudioDec hand-off. Keep it restricted to
+        // arm64 devices with hardware AES, where receive-thread decrypt + Opus decode is
+        // comfortably bounded and the native AAudio producer is guaranteed non-blocking.
+        if (DirectNativeAudio &&
+                android_getCpuFamily() == ANDROID_CPU_FAMILY_ARM64 && hasFastAes()) {
+            AudioCallbacks.capabilities |= CAPABILITY_DIRECT_SUBMIT;
+            __android_log_print(ANDROID_LOG_INFO, "ArtemisAudio",
+                                "Enabled native audio direct submit (arm64 hardware AES)");
+        }
     }
 
     return err;
@@ -244,37 +295,57 @@ void BridgeArStop(void) {
 void BridgeArCleanup() {
     JNIEnv* env = GetThreadEnv();
 
-    opus_multistream_decoder_destroy(Decoder);
+    if (Decoder != NULL) {
+        opus_multistream_decoder_destroy(Decoder);
+        Decoder = NULL;
+    }
 
-    (*env)->DeleteGlobalRef(env, DecodedAudioBuffer);
+    free(DecodedPcmBuffer);
+    DecodedPcmBuffer = NULL;
+
+    if (DecodedAudioBuffer != NULL) {
+        (*env)->DeleteGlobalRef(env, DecodedAudioBuffer);
+        DecodedAudioBuffer = NULL;
+    }
+
+    DirectNativeAudio = false;
+    AudioCallbacks.capabilities &= ~CAPABILITY_DIRECT_SUBMIT;
 
     (*env)->CallStaticVoidMethod(env, GlobalBridgeClass, BridgeArCleanupMethod);
 }
 
 void BridgeArDecodeAndPlaySample(char* sampleData, int sampleLength) {
-    JNIEnv* env = GetThreadEnv();
-
-    jshort* decodedData = (*env)->GetPrimitiveArrayCritical(env, DecodedAudioBuffer, NULL);
-
+    if (Decoder == NULL || DecodedPcmBuffer == NULL) {
+        return;
+    }
     int decodeLen = opus_multistream_decode(Decoder,
                                             (const unsigned char*)sampleData,
                                             sampleLength,
-                                            decodedData,
+                                            DecodedPcmBuffer,
                                             OpusConfig.samplesPerFrame,
                                             0);
-    if (decodeLen > 0) {
-        // We must release the array elements before making further JNI calls
-        (*env)->ReleasePrimitiveArrayCritical(env, DecodedAudioBuffer, decodedData, 0);
+    if (decodeLen <= 0) {
+        return;
+    }
 
-        (*env)->CallStaticVoidMethod(env, GlobalBridgeClass, BridgeArPlaySampleMethod, DecodedAudioBuffer);
+    if (DirectNativeAudio) {
+        ArtemisAaudioRendererWriteDecoded(DecodedPcmBuffer,
+                                          (uint32_t)decodeLen,
+                                          OpusConfig.channelCount);
+    }
+    else {
+        JNIEnv* env = GetThreadEnv();
+        (*env)->SetShortArrayRegion(env,
+                                    DecodedAudioBuffer,
+                                    0,
+                                    decodeLen * OpusConfig.channelCount,
+                                    (const jshort*)DecodedPcmBuffer);
+        (*env)->CallStaticVoidMethod(env, GlobalBridgeClass, BridgeArPlaySampleMethod,
+                                     DecodedAudioBuffer);
         if ((*env)->ExceptionCheck(env)) {
             // We will crash here
             (*JVM)->DetachCurrentThread(JVM);
         }
-    }
-    else {
-        // We can abort here to avoid the copy back since no data was modified
-        (*env)->ReleasePrimitiveArrayCritical(env, DecodedAudioBuffer, decodedData, JNI_ABORT);
     }
 }
 
@@ -429,7 +500,7 @@ static CONNECTION_LISTENER_CALLBACKS BridgeConnListenerCallbacks = {
 };
 
 static bool
-hasFastAes() {
+hasFastAes(void) {
     if (android_getCpuCount() <= 2) {
         return false;
     }

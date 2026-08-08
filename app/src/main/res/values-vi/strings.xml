@@ -335,7 +335,7 @@
     <string name="pacing_smoothness">Ưu tiên video mượt nhất (có thể tăng đáng kể độ trễ)</string>
 
 
-    <string name="keyboard_service_label">Bàn phím vật lý Artemis</string>
+    <string name="keyboard_service_label">Bàn phím vật lý Artemis Buffered</string>
     <string name="accessibility_description_text">Chỉ được sử dụng khi phím tắt bàn phím vật lý bị hệ thống chặn. Trong một số hệ thống, một số phím tắt bàn phím được định nghĩa và sử dụng bởi hệ thống Android, khiến chúng không thể được chuyển qua PC máy chủ. Artemis sẽ không xem qua đầu vào của bạn, cũng không thu thập mật khẩu, số thẻ tín dụng hoặc bất kỳ thông tin cá nhân nào khác của bạn.</string>
 
 

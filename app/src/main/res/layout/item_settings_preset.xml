@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/settingsPresetCard"
+    android:layout_width="220dp"
+    android:layout_height="wrap_content"
+    android:layout_marginEnd="10dp"
+    android:clickable="true"
+    android:focusable="true"
+    android:minHeight="166dp"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <EditText
+        android:id="@+id/settingsPresetName"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:backgroundTint="@color/artemisBufferedPreferenceSummary"
+        android:contentDescription="@string/settings_preset_name_hint"
+        android:imeOptions="actionDone"
+        android:inputType="textCapSentences"
+        android:maxLines="1"
+        android:paddingStart="2dp"
+        android:paddingEnd="2dp"
+        android:selectAllOnFocus="false"
+        android:textColor="@color/artemisBufferedPreferenceText"
+        android:textColorHint="@color/artemisBufferedPreferenceSummary"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/settingsPresetResolution"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:maxLines="1"
+        android:textColor="@color/artemisBufferedPreferenceText"
+        android:textSize="14sp" />
+
+    <TextView
+        android:id="@+id/settingsPresetFps"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="3dp"
+        android:maxLines="1"
+        android:textColor="@color/artemisBufferedPreferenceText"
+        android:textSize="14sp" />
+
+    <TextView
+        android:id="@+id/settingsPresetBitrate"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="3dp"
+        android:maxLines="1"
+        android:textColor="@color/artemisBufferedPreferenceText"
+        android:textSize="14sp" />
+
+    <LinearLayout
+        android:id="@+id/settingsPresetActions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:gravity="end"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/settingsPresetSave"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:backgroundTint="@color/artemisBufferedPreferenceText"
+            android:minWidth="0dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:text="@string/settings_preset_save"
+            android:textAllCaps="false"
+            android:textColor="@color/settingsPresetButtonText"
+            android:textSize="13sp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/settingsPresetReset"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:backgroundTint="@color/artemisBufferedPreferenceSummary"
+            android:minWidth="0dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:text="@string/settings_preset_reset"
+            android:textAllCaps="false"
+            android:textColor="@color/settingsPresetButtonText"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+
+</LinearLayout>

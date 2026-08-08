@@ -20,6 +20,7 @@ import java.io.Reader;
 import java.io.Writer;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,10 @@ import java.util.UUID;
 public class ProfilesManager {
     private static final String PROFILES_DIR = "profiles";
     private static final String PROFILES_FILE = "profiles.json";
+    static final String SNAPSHOT_VERSION_KEY =
+            "__artemis_buffered_preset_snapshot_version";
+    static final String UNSET_KEYS_KEY =
+            "__artemis_buffered_preset_unset_keys";
 
     static ProfilesManager instance;
 
@@ -212,40 +217,74 @@ public class ProfilesManager {
     private static class OverlaySharedPreferences implements SharedPreferences {
         private final SharedPreferences base;
         private final Map<String, Object> patch;
+        private final Set<String> unsetKeys = new HashSet<>();
         OverlaySharedPreferences(SharedPreferences base, Map<String, Object> patch) {
             this.base = base;
             this.patch = patch;
+            if (patch.containsKey(SNAPSHOT_VERSION_KEY)) {
+                Object unset = patch.get(UNSET_KEYS_KEY);
+                if (unset instanceof Iterable) {
+                    for (Object key : (Iterable<?>) unset) {
+                        if (key != null) {
+                            unsetKeys.add(key.toString());
+                        }
+                    }
+                }
+            }
         }
         @Override public Map<String, ?> getAll() {
             Map<String, Object> combined = new LinkedHashMap<>(base.getAll());
+            for (String key : unsetKeys) combined.remove(key);
             combined.putAll(patch);
             return combined;
         }
         @Override public String getString(String key, String defValue) {
+            if (unsetKeys.contains(key)) return defValue;
             if (patch.containsKey(key)) return (String) patch.get(key);
             return base.getString(key, defValue);
         }
         @Override public int getInt(String key, int defValue) {
+            if (unsetKeys.contains(key)) return defValue;
             if (patch.containsKey(key)) return ((Number) patch.get(key)).intValue();
             return base.getInt(key, defValue);
         }
         @Override public long getLong(String key, long defValue) {
+            if (unsetKeys.contains(key)) return defValue;
             if (patch.containsKey(key)) return ((Number) patch.get(key)).longValue();
             return base.getLong(key, defValue);
         }
         @Override public float getFloat(String key, float defValue) {
+            if (unsetKeys.contains(key)) return defValue;
             if (patch.containsKey(key)) return ((Number) patch.get(key)).floatValue();
             return base.getFloat(key, defValue);
         }
         @Override public boolean getBoolean(String key, boolean defValue) {
+            if (unsetKeys.contains(key)) return defValue;
             if (patch.containsKey(key)) return (Boolean) patch.get(key);
             return base.getBoolean(key, defValue);
         }
         @Override public Set<String> getStringSet(String key, Set<String> defValues) {
-            if (patch.containsKey(key)) return (Set<String>) patch.get(key);
+            if (unsetKeys.contains(key)) return defValues;
+            if (patch.containsKey(key)) {
+                Object value = patch.get(key);
+                if (value instanceof Set) {
+                    return new HashSet<>((Set<String>) value);
+                }
+                if (value instanceof Iterable) {
+                    Set<String> strings = new HashSet<>();
+                    for (Object item : (Iterable<?>) value) {
+                        if (item != null) {
+                            strings.add(item.toString());
+                        }
+                    }
+                    return strings;
+                }
+                return defValues;
+            }
             return base.getStringSet(key, defValues);
         }
         @Override public boolean contains(String key) {
+            if (unsetKeys.contains(key)) return false;
             return patch.containsKey(key) || base.contains(key);
         }
         @Override public Editor edit() { return base.edit(); }

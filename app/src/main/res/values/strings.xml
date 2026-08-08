@@ -357,7 +357,7 @@
     <string name="pacing_smoothness">Prefer smoothest video (may significantly increase latency)</string>
 
 
-    <string name="keyboard_service_label">Artemis Physical keyboard</string>
+    <string name="keyboard_service_label">Artemis Buffered Physical Keyboard</string>
     <string name="accessibility_description_text">Only used when physical keyboard shortcut were intercepted by system. In some systems, several keyboard shortcut are defind and used by the Android system, causing them not being able to be passed through to the host PC. Artemis will not look through your input, nor collecting your password, credit card number or any other private information.</string>
 
 
@@ -440,6 +440,24 @@
     <string name="summary_checkbox_enable_audio_diagnostics">Record timestamped audio buffer, jitter, underrun, drop, and write-error data for the 8 most recent streaming sessions. Logs stay on this device until shared.</string>
     <string name="category_artemis_buffered_settings">Artemis Buffered (custom settings)</string>
     <string name="summary_category_artemis_buffered_settings">Orange settings are specific to this build</string>
+    <string name="settings_preset_title">Settings presets</string>
+    <string name="settings_preset_summary">Select a card to switch presets. Edit settings, then save or reset the selected card.</string>
+    <string name="settings_preset_default_name">Preset %1$d</string>
+    <string name="settings_preset_add">Add settings preset</string>
+    <string name="settings_preset_add_short">Add</string>
+    <string name="settings_preset_name_hint">Preset name</string>
+    <string name="settings_preset_resolution">Size  %1$s</string>
+    <string name="settings_preset_fps">FPS  %1$s</string>
+    <string name="settings_preset_bitrate">Bitrate  %1$s Mbps</string>
+    <string name="settings_preset_save">Save</string>
+    <string name="settings_preset_reset">Reset</string>
+    <string name="settings_preset_selected">selected</string>
+    <string name="settings_preset_card_description">%1$s, size %2$s, %3$s FPS, %4$s megabits per second, %5$s</string>
+    <string name="settings_preset_added">Added %1$s</string>
+    <string name="settings_preset_switched">Switched to %1$s</string>
+    <string name="settings_preset_saved">Preset saved</string>
+    <string name="settings_preset_reset_done">Changes reset</string>
+    <string name="settings_preset_name_required">Preset name cannot be blank</string>
     <string name="title_checkbox_enable_callback_audio_buffer">Fixed 40 ms callback audio buffer</string>
     <string name="summary_checkbox_enable_callback_audio_buffer">Off (default): use the original AudioTrack behavior from the cloned repository. On: use the fixed 40 ms AAudio callback + SPSC ring on Android 8.1+ and enable the adaptive option below. Audio effects continue to use AudioTrack.</string>
     <string name="title_checkbox_enable_adaptive_audio_buffer">Adaptive 20–80 ms + WSOLA-style processing</string>

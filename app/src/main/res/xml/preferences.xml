@@ -11,6 +11,12 @@
         android:title="@string/category_artemis_buffered_settings"
         app:iconSpaceReserved="false">
 
+        <com.limelight.preferences.SettingsPresetPreference
+            android:key="artemis_settings_preset_carousel"
+            android:summary="@string/settings_preset_summary"
+            android:title="@string/settings_preset_title"
+            app:iconSpaceReserved="false" />
+
         <com.limelight.preferences.ArtemisSwitchPreference
             android:defaultValue="false"
             android:key="checkbox_enable_callback_audio_buffer"

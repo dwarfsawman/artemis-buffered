@@ -8,6 +8,8 @@ import android.content.Context;
 import android.content.res.XmlResourceParser;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.view.LayoutInflater;
+import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -15,6 +17,7 @@ import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.ColorUtils;
 import androidx.preference.PreferenceViewHolder;
+import androidx.recyclerview.widget.RecyclerView;
 import androidx.test.core.app.ApplicationProvider;
 
 import com.limelight.R;
@@ -75,6 +78,8 @@ public class ArtemisSettingsAppearanceTest {
                 customTags.get(PreferenceConfiguration.ENABLE_AUDIO_DIAGNOSTICS_PREF_STRING));
         assertEquals("com.limelight.preferences.ArtemisPreference",
                 customTags.get("share_audio_diagnostic_logs"));
+        assertEquals("com.limelight.preferences.SettingsPresetPreference",
+                customTags.get(SettingsPresetPreference.KEY));
     }
 
     @Test
@@ -111,6 +116,26 @@ public class ArtemisSettingsAppearanceTest {
     public void customRowsRemainDistinctInDarkTheme() throws Exception {
         Context context = ApplicationProvider.getApplicationContext();
         verifyStyledRow(context);
+    }
+
+    @Test
+    public void presetCarouselLayoutsInflateWithRequiredControls() {
+        Context context = ApplicationProvider.getApplicationContext();
+        View carousel = LayoutInflater.from(context).inflate(
+                R.layout.preference_settings_preset_carousel, null, false);
+        View preset = LayoutInflater.from(context).inflate(
+                R.layout.item_settings_preset, null, false);
+        View add = LayoutInflater.from(context).inflate(
+                R.layout.item_settings_preset_add, null, false);
+
+        assertTrue(carousel.findViewById(R.id.settingsPresetCarousel) instanceof RecyclerView);
+        assertNotNull(preset.findViewById(R.id.settingsPresetName));
+        assertNotNull(preset.findViewById(R.id.settingsPresetResolution));
+        assertNotNull(preset.findViewById(R.id.settingsPresetFps));
+        assertNotNull(preset.findViewById(R.id.settingsPresetBitrate));
+        assertNotNull(preset.findViewById(R.id.settingsPresetSave));
+        assertNotNull(preset.findViewById(R.id.settingsPresetReset));
+        assertNotNull(add.findViewById(R.id.settingsPresetAddCard));
     }
 
     private static void verifyStyledRow(Context context) throws Exception {

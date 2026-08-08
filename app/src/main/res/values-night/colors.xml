@@ -4,4 +4,7 @@
     <color name="artemisBufferedPreferenceBackground">#FFA73312</color>
     <color name="artemisBufferedPreferenceText">#FFFFFFFF</color>
     <color name="artemisBufferedPreferenceSummary">#FFFFD8CC</color>
+    <color name="settingsPresetCard">#FF321912</color>
+    <color name="settingsPresetCardSelected">#FF1E0E09</color>
+    <color name="settingsPresetButtonText">#FF6D220D</color>
 </resources>

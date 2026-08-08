@@ -25,6 +25,7 @@ import androidx.preference.ListPreference;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceCategory;
 import androidx.preference.PreferenceFragmentCompat;
+import androidx.preference.PreferenceGroup;
 import androidx.preference.PreferenceManager;
 import androidx.preference.PreferenceScreen;
 
@@ -68,8 +69,10 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Set;
 
 public class StreamSettings extends AppCompatActivity implements SearchPreferenceResultListener {
     private PreferenceConfiguration previousPrefs;
@@ -185,6 +188,23 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
 
         protected SharedPreferences getPrefs() {
             return getPreferenceManager().getSharedPreferences();
+        }
+
+        private void collectPresetKeys(Preference preference, Set<String> keys) {
+            if (preference instanceof PreferenceGroup) {
+                PreferenceGroup group = (PreferenceGroup) preference;
+                for (int index = 0; index < group.getPreferenceCount(); index++) {
+                    collectPresetKeys(group.getPreference(index), keys);
+                }
+                return;
+            }
+
+            String key = preference.getKey();
+            if (key != null && !key.isEmpty() &&
+                    !SettingsPresetPreference.KEY.equals(key) &&
+                    !"searchPreference".equals(key)) {
+                keys.add(key);
+            }
         }
 
         private void setValue(String preferenceKey, String value) {
@@ -353,6 +373,21 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
         public void initializePreferences() {
             addPreferencesFromResource(R.xml.preferences);
             PreferenceScreen screen = getPreferenceScreen();
+
+            SettingsPresetPreference presetPreference =
+                    findPreference(SettingsPresetPreference.KEY);
+            if (presetPreference != null) {
+                // The profile editor already uses an isolated PreferenceDataStore. Showing the
+                // global preset carousel there would mutate the live settings behind the editor.
+                if (getPreferenceManager().getPreferenceDataStore() != null) {
+                    presetPreference.setVisible(false);
+                }
+                else {
+                    Set<String> presetKeys = new HashSet<>();
+                    collectPresetKeys(screen, presetKeys);
+                    presetPreference.configure(getPrefs(), presetKeys, this::reloadSettings);
+                }
+            }
 
             AppCompatActivity activity = (AppCompatActivity) requireActivity();
             PackageManager pm = activity.getPackageManager();

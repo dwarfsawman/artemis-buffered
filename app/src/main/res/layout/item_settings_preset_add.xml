@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/settingsPresetAddCard"
+    android:layout_width="88dp"
+    android:layout_height="166dp"
+    android:clickable="true"
+    android:contentDescription="@string/settings_preset_add"
+    android:focusable="true"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="10dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:importantForAccessibility="no"
+        android:text="+"
+        android:textColor="@color/artemisBufferedPreferenceText"
+        android:textSize="36sp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:importantForAccessibility="no"
+        android:text="@string/settings_preset_add_short"
+        android:textColor="@color/artemisBufferedPreferenceText"
+        android:textSize="13sp" />
+
+</LinearLayout>

@@ -328,7 +328,7 @@
     <string name="pacing_balanced_alt">Équilibré avec limite FPS</string>
     <string name="pacing_smoothness">Préférer la qualité vidéo (risque d\'augmenter la latence)</string>
 
-    <string name="keyboard_service_label">Clavier physique Artemis</string>
+    <string name="keyboard_service_label">Clavier physique Artemis Buffered</string>
     <string name="accessibility_description_text">Utilisé uniquement lorsque les raccourcis clavier physiques sont interceptés par le système. Dans certains systèmes, plusieurs raccourcis clavier sont définis et utilisés par le système Android, empêchant leur transmission au PC hôte. Artemis ne regardera pas votre saisie, ni ne collectera votre mot de passe, votre numéro de carte de crédit ou toute autre information personnelle.</string>
 
     <!-- In Game menu -->

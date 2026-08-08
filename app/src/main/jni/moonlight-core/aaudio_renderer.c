@@ -11,6 +11,12 @@
 #include <string.h>
 #include <time.h>
 
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
+#include "aaudio_renderer.h"
+
 #define LOG_TAG "ArtemisAAudio"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
@@ -82,9 +88,11 @@ typedef struct {
     int32_t performanceMode;
     int32_t sharingMode;
     int64_t lastArrivalNs;
+    int64_t lastDeliveryNs;
     int64_t lastTargetDecreaseNs;
     int64_t protectionUntilNs;
     uint32_t previousPacketFrames;
+    uint32_t previousDeliveryFrames;
     uint32_t observedUnderrunCallbacks;
     double jitterMs;
     atomic_uint readFrame;
@@ -107,6 +115,7 @@ typedef struct {
     int64_t lastCallbackTimeNs;
     atomic_uint callbackCount;
     atomic_uint maxCallbackGapMicros;
+    atomic_uint deliveryGapEvents;
     atomic_uint diagnosticEventsDropped;
     atomic_uint diagnosticEventWriteSequence;
     atomic_uint diagnosticEventReadSequence;
@@ -131,11 +140,14 @@ enum {
     DIAGNOSTIC_EVENT_RING_OVERFLOW = 6,
     DIAGNOSTIC_EVENT_START_FAILED = 7,
     DIAGNOSTIC_EVENT_STREAM_ERROR = 8,
+    DIAGNOSTIC_EVENT_DELIVERY_GAP = 9,
     NATIVE_STATS_COUNT = 20,
 };
 
 static AAudioApi gApi;
 static pthread_once_t gApiOnce = PTHREAD_ONCE_INIT;
+static pthread_mutex_t gDirectRendererMutex = PTHREAD_MUTEX_INITIALIZER;
+static AAudioRenderer* gDirectRenderer;
 
 #define LOAD_REQUIRED(field, symbolName)                                                   \
     do {                                                                                  \
@@ -507,21 +519,49 @@ static void maybeStart(AAudioRenderer* renderer) {
 static double normalizedCorrelation(const AAudioRenderer* renderer, const int16_t* input,
                                     uint32_t firstFrame, uint32_t secondFrame,
                                     uint32_t frameCount) {
-    double cross = 0.0;
-    double firstEnergy = 1.0;
-    double secondEnergy = 1.0;
-    for (uint32_t frame = 0; frame < frameCount; frame++) {
-        size_t firstOffset = (size_t)(firstFrame + frame) * renderer->channelCount;
-        size_t secondOffset = (size_t)(secondFrame + frame) * renderer->channelCount;
-        for (int32_t channel = 0; channel < renderer->channelCount; channel++) {
-            double first = input[firstOffset + channel];
-            double second = input[secondOffset + channel];
-            cross += first * second;
-            firstEnergy += first * first;
-            secondEnergy += second * second;
-        }
+    size_t sampleCount = (size_t)frameCount * renderer->channelCount;
+    const int16_t* firstSamples = input + (size_t)firstFrame * renderer->channelCount;
+    const int16_t* secondSamples = input + (size_t)secondFrame * renderer->channelCount;
+    int64_t cross = 0;
+    int64_t firstEnergy = 1;
+    int64_t secondEnergy = 1;
+    size_t sample = 0;
+
+#if defined(__aarch64__)
+    int64x2_t crossVector = vdupq_n_s64(0);
+    int64x2_t firstEnergyVector = vdupq_n_s64(0);
+    int64x2_t secondEnergyVector = vdupq_n_s64(0);
+    for (; sample + 8 <= sampleCount; sample += 8) {
+        int16x8_t first = vld1q_s16(firstSamples + sample);
+        int16x8_t second = vld1q_s16(secondSamples + sample);
+
+        int32x4_t crossLow = vmull_s16(vget_low_s16(first), vget_low_s16(second));
+        int32x4_t crossHigh = vmull_s16(vget_high_s16(first), vget_high_s16(second));
+        int32x4_t firstLow = vmull_s16(vget_low_s16(first), vget_low_s16(first));
+        int32x4_t firstHigh = vmull_s16(vget_high_s16(first), vget_high_s16(first));
+        int32x4_t secondLow = vmull_s16(vget_low_s16(second), vget_low_s16(second));
+        int32x4_t secondHigh = vmull_s16(vget_high_s16(second), vget_high_s16(second));
+
+        crossVector = vaddq_s64(crossVector, vpaddlq_s32(crossLow));
+        crossVector = vaddq_s64(crossVector, vpaddlq_s32(crossHigh));
+        firstEnergyVector = vaddq_s64(firstEnergyVector, vpaddlq_s32(firstLow));
+        firstEnergyVector = vaddq_s64(firstEnergyVector, vpaddlq_s32(firstHigh));
+        secondEnergyVector = vaddq_s64(secondEnergyVector, vpaddlq_s32(secondLow));
+        secondEnergyVector = vaddq_s64(secondEnergyVector, vpaddlq_s32(secondHigh));
     }
-    return cross / sqrt(firstEnergy * secondEnergy);
+    cross += vaddvq_s64(crossVector);
+    firstEnergy += vaddvq_s64(firstEnergyVector);
+    secondEnergy += vaddvq_s64(secondEnergyVector);
+#endif
+
+    for (; sample < sampleCount; sample++) {
+        int32_t first = firstSamples[sample];
+        int32_t second = secondSamples[sample];
+        cross += (int64_t)first * second;
+        firstEnergy += (int64_t)first * first;
+        secondEnergy += (int64_t)second * second;
+    }
+    return (double)cross / sqrt((double)firstEnergy * (double)secondEnergy);
 }
 
 static uint32_t findBestSplice(const AAudioRenderer* renderer, const int16_t* input,
@@ -564,6 +604,18 @@ static uint32_t findBestSplice(const AAudioRenderer* renderer, const int16_t* in
     return bestSplice;
 }
 
+#if defined(__aarch64__)
+static inline int16x4_t neonMixFour(int16x4_t first, int16x4_t second,
+                                   int32x4_t firstWeight, int32x4_t secondWeight,
+                                   float reciprocalDivisor) {
+    int32x4_t mixed = vmlaq_s32(vmulq_s32(vmovl_s16(first), firstWeight),
+                                vmovl_s16(second), secondWeight);
+    int32x4_t divided = vcvtq_s32_f32(
+            vmulq_n_f32(vcvtq_f32_s32(mixed), reciprocalDivisor));
+    return vmovn_s32(divided);
+}
+#endif
+
 static uint32_t overlapAdd(AAudioRenderer* renderer, const int16_t* input,
                            uint32_t inputFrames, uint32_t overlapFrames,
                            uint32_t adjustmentFrames, uint32_t spliceFrame,
@@ -578,15 +630,69 @@ static uint32_t overlapAdd(AAudioRenderer* renderer, const int16_t* input,
     uint32_t secondStartFrame = expanding ?
             spliceFrame - adjustmentFrames - overlapFrames :
             spliceFrame + adjustmentFrames - overlapFrames;
-    for (uint32_t frame = 0; frame < overlapFrames; frame++) {
+    uint32_t frame = 0;
+    int32_t divisor = (int32_t)overlapFrames - 1;
+
+#if defined(__aarch64__)
+    // Stereo is the common path. Process four frames (eight samples) per iteration,
+    // duplicating each frame's crossfade weight across its left/right pair.
+    if (renderer->channelCount == 2) {
+        float reciprocalDivisor = 1.0f / divisor;
+        for (; frame + 4 <= overlapFrames; frame += 4) {
+            size_t firstOffset = (size_t)(spliceFrame - overlapFrames + frame) * 2;
+            size_t secondOffset = (size_t)(secondStartFrame + frame) * 2;
+            size_t outputOffset = (size_t)(prefixFrames + frame) * 2;
+            int32_t firstWeightsArray[4] = {
+                    divisor - (int32_t)frame,
+                    divisor - (int32_t)frame - 1,
+                    divisor - (int32_t)frame - 2,
+                    divisor - (int32_t)frame - 3,
+            };
+            int32_t secondWeightsArray[4] = {
+                    (int32_t)frame,
+                    (int32_t)frame + 1,
+                    (int32_t)frame + 2,
+                    (int32_t)frame + 3,
+            };
+            int32x4_t firstWeights = vld1q_s32(firstWeightsArray);
+            int32x4_t secondWeights = vld1q_s32(secondWeightsArray);
+            int32x4x2_t duplicatedFirst = vzipq_s32(firstWeights, firstWeights);
+            int32x4x2_t duplicatedSecond = vzipq_s32(secondWeights, secondWeights);
+            int16x8_t firstSamples = vld1q_s16(input + firstOffset);
+            int16x8_t secondSamples = vld1q_s16(input + secondOffset);
+            int16x8_t mixed = vcombine_s16(
+                    neonMixFour(vget_low_s16(firstSamples), vget_low_s16(secondSamples),
+                                duplicatedFirst.val[0], duplicatedSecond.val[0],
+                                reciprocalDivisor),
+                    neonMixFour(vget_high_s16(firstSamples), vget_high_s16(secondSamples),
+                                duplicatedFirst.val[1], duplicatedSecond.val[1],
+                                reciprocalDivisor));
+            vst1q_s16(output + outputOffset, mixed);
+        }
+    }
+#endif
+
+    for (; frame < overlapFrames; frame++) {
         size_t firstOffset = (size_t)(spliceFrame - overlapFrames + frame) *
                              renderer->channelCount;
         size_t secondOffset = (size_t)(secondStartFrame + frame) * renderer->channelCount;
         size_t outputOffset = (size_t)(prefixFrames + frame) * renderer->channelCount;
         int32_t firstWeight = (int32_t)(overlapFrames - 1 - frame);
         int32_t secondWeight = (int32_t)frame;
-        int32_t divisor = (int32_t)overlapFrames - 1;
-        for (int32_t channel = 0; channel < renderer->channelCount; channel++) {
+        int32_t channel = 0;
+#if defined(__aarch64__)
+        float reciprocalDivisor = 1.0f / divisor;
+        int32x4_t firstWeightVector = vdupq_n_s32(firstWeight);
+        int32x4_t secondWeightVector = vdupq_n_s32(secondWeight);
+        for (; channel + 4 <= renderer->channelCount; channel += 4) {
+            int16x4_t mixed = neonMixFour(
+                    vld1_s16(input + firstOffset + channel),
+                    vld1_s16(input + secondOffset + channel),
+                    firstWeightVector, secondWeightVector, reciprocalDivisor);
+            vst1_s16(output + outputOffset + channel, mixed);
+        }
+#endif
+        for (; channel < renderer->channelCount; channel++) {
             int32_t mixed = (input[firstOffset + channel] * firstWeight +
                              input[secondOffset + channel] * secondWeight) / divisor;
             output[outputOffset + channel] = (int16_t)mixed;
@@ -740,6 +846,35 @@ static uint32_t writeFrames(AAudioRenderer* renderer, const int16_t* samples, ui
         return 0;
     }
 
+    if (renderer->diagnosticsEnabled) {
+        int64_t nowNs = elapsedRealtimeNs();
+        if (renderer->lastDeliveryNs > 0 && renderer->previousDeliveryFrames > 0) {
+            int64_t gapUs = (nowNs - renderer->lastDeliveryNs) / 1000;
+            int64_t expectedUs =
+                    (int64_t)renderer->previousDeliveryFrames * 1000000 / renderer->sampleRate;
+            int64_t thresholdUs = expectedUs * 3;
+            if (thresholdUs < 50000) {
+                thresholdUs = 50000;
+            }
+            if (gapUs > thresholdUs) {
+                uint32_t totalEvents = atomic_fetch_add_explicit(
+                        &renderer->deliveryGapEvents, 1, memory_order_relaxed) + 1;
+                enqueueDiagnosticEvent(renderer,
+                                       DIAGNOSTIC_EVENT_DELIVERY_GAP,
+                                       nowNs,
+                                       gapUs,
+                                       expectedUs,
+                                       thresholdUs,
+                                       totalEvents,
+                                       renderer->previousDeliveryFrames,
+                                       frames,
+                                       0);
+            }
+        }
+        renderer->lastDeliveryNs = nowNs;
+        renderer->previousDeliveryFrames = frames;
+    }
+
     uint32_t readFrame = atomic_load_explicit(&renderer->readFrame, memory_order_acquire);
     uint32_t writeFrame = atomic_load_explicit(&renderer->writeFrame, memory_order_relaxed);
     uint32_t queuedFrames = writeFrame - readFrame;
@@ -776,6 +911,33 @@ static uint32_t writeFrames(AAudioRenderer* renderer, const int16_t* samples, ui
 
     maybeStart(renderer);
     return acceptedFrames;
+}
+
+bool ArtemisAaudioRendererIsActive(void) {
+    pthread_mutex_lock(&gDirectRendererMutex);
+    bool active = gDirectRenderer != NULL &&
+            !atomic_load_explicit(&gDirectRenderer->closing, memory_order_acquire);
+    pthread_mutex_unlock(&gDirectRendererMutex);
+    return active;
+}
+
+int32_t ArtemisAaudioRendererWriteDecoded(const int16_t* samples,
+                                          uint32_t frames,
+                                          int32_t channelCount) {
+    if (samples == NULL || frames == 0) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&gDirectRendererMutex);
+    AAudioRenderer* renderer = gDirectRenderer;
+    if (renderer == NULL || renderer->channelCount != channelCount ||
+            atomic_load_explicit(&renderer->closing, memory_order_acquire)) {
+        pthread_mutex_unlock(&gDirectRendererMutex);
+        return -2;
+    }
+    uint32_t acceptedFrames = writeFrames(renderer, samples, frames);
+    pthread_mutex_unlock(&gDirectRendererMutex);
+    return (int32_t)acceptedFrames;
 }
 
 static void destroyRenderer(AAudioRenderer* renderer) {
@@ -880,6 +1042,7 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
     atomic_init(&renderer->firstCallbackTimeNs, 0);
     atomic_init(&renderer->callbackCount, 0);
     atomic_init(&renderer->maxCallbackGapMicros, 0);
+    atomic_init(&renderer->deliveryGapEvents, 0);
     atomic_init(&renderer->diagnosticEventsDropped, 0);
     atomic_init(&renderer->diagnosticEventWriteSequence, 0);
     atomic_init(&renderer->diagnosticEventReadSequence, 0);
@@ -961,6 +1124,9 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
          sampleRate, channelCount, renderer->adaptive ? "20-80 ms adaptive" : "40 ms fixed",
          renderer->capacityFrames, renderer->framesPerBurst,
          renderer->performanceMode);
+    pthread_mutex_lock(&gDirectRendererMutex);
+    gDirectRenderer = renderer;
+    pthread_mutex_unlock(&gDirectRendererMutex);
     return (jlong)(intptr_t)renderer;
 }
 
@@ -1119,5 +1285,11 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeDestroy(
         JNIEnv* env, jclass clazz, jlong handle) {
     (void)env;
     (void)clazz;
-    destroyRenderer((AAudioRenderer*)(intptr_t)handle);
+    AAudioRenderer* renderer = (AAudioRenderer*)(intptr_t)handle;
+    pthread_mutex_lock(&gDirectRendererMutex);
+    if (gDirectRenderer == renderer) {
+        gDirectRenderer = NULL;
+    }
+    destroyRenderer(renderer);
+    pthread_mutex_unlock(&gDirectRendererMutex);
 }
