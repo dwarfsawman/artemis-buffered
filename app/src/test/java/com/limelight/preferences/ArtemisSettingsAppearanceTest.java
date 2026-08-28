@@ -37,6 +37,17 @@ public class ArtemisSettingsAppearanceTest {
     private static final String ANDROID_NS = "http://schemas.android.com/apk/res/android";
 
     @Test
+    public void resolutionListIncludes1920By1200() {
+        Context context = ApplicationProvider.getApplicationContext();
+        String[] names = context.getResources().getStringArray(R.array.resolution_names);
+        String[] values = context.getResources().getStringArray(R.array.resolution_values);
+
+        assertEquals(names.length, values.length);
+        assertEquals("1920 × 1200", names[4]);
+        assertEquals(PreferenceConfiguration.RES_1920_1200, values[4]);
+    }
+
+    @Test
     public void customSettingsAreTheFirstCategoryAndUseStyledPreferenceClasses()
             throws Exception {
         Context context = ApplicationProvider.getApplicationContext();

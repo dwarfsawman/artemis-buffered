@@ -75,6 +75,7 @@ typedef struct {
     int16_t* ring;
     int16_t* stretchBuffer;
     uint32_t capacityFrames;
+    uint32_t steadyCapacityFrames;
     uint32_t stretchCapacityFrames;
     uint32_t minTargetFrames;
     uint32_t maxTargetFrames;
@@ -100,6 +101,7 @@ typedef struct {
     atomic_uint targetFrames;
     atomic_bool armed;
     atomic_bool started;
+    atomic_bool primed;
     atomic_bool closing;
     atomic_uint underrunCallbacks;
     atomic_uint underrunFrames;
@@ -127,6 +129,8 @@ enum {
     MIN_TARGET_MS = 20,
     INITIAL_TARGET_MS = 40,
     MAX_TARGET_MS = 80,
+    RING_HEADROOM_MS = 100,
+    STARTUP_CAPACITY_MS = 2000,
     TARGET_DECREASE_INTERVAL_MS = 1000,
     UNDERRUN_PROTECTION_MS = 5000,
     RATE_ONE_PPM = 1000000,
@@ -141,7 +145,8 @@ enum {
     DIAGNOSTIC_EVENT_START_FAILED = 7,
     DIAGNOSTIC_EVENT_STREAM_ERROR = 8,
     DIAGNOSTIC_EVENT_DELIVERY_GAP = 9,
-    NATIVE_STATS_COUNT = 20,
+    DIAGNOSTIC_EVENT_PRIMED = 10,
+    NATIVE_STATS_COUNT = 21,
 };
 
 static AAudioApi gApi;
@@ -358,7 +363,6 @@ static aaudio_data_callback_result_t dataCallback(AAudioStream* stream, void* us
     uint32_t writeFrame = atomic_load_explicit(&renderer->writeFrame, memory_order_acquire);
     uint32_t availableFrames = writeFrame - readFrame;
     uint32_t requestedFrames = (uint32_t)numFrames;
-    uint32_t copiedFrames = availableFrames < requestedFrames ? availableFrames : requestedFrames;
     int64_t callbackTimeNs = 0;
     uint32_t callbackGapMicros = 0;
     uint32_t callbackNumber = 0;
@@ -408,6 +412,40 @@ static aaudio_data_callback_result_t dataCallback(AAudioStream* stream, void* us
                                    0);
         }
     }
+
+    // Start AAudio as soon as the renderer is armed so device-route warm-up happens before
+    // useful PCM playback. Until the initial target is available, callbacks emit silence
+    // without consuming the ring or reporting expected startup underruns. If the device paused
+    // its callback during warm-up, discard stale startup PCM and begin from the newest target.
+    if (!atomic_load_explicit(&renderer->primed, memory_order_acquire)) {
+        uint32_t targetFrames = atomic_load_explicit(&renderer->targetFrames,
+                                                     memory_order_acquire);
+        if (availableFrames < targetFrames) {
+            memset(output, 0,
+                   (size_t)requestedFrames * renderer->channelCount * sizeof(int16_t));
+            return AAUDIO_CALLBACK_RESULT_CONTINUE;
+        }
+
+        uint32_t discardedFrames = availableFrames - targetFrames;
+        if (discardedFrames > 0) {
+            readFrame += discardedFrames;
+            availableFrames = targetFrames;
+            atomic_store_explicit(&renderer->readFrame, readFrame, memory_order_release);
+        }
+        atomic_store_explicit(&renderer->primed, true, memory_order_release);
+        enqueueDiagnosticEvent(renderer,
+                               DIAGNOSTIC_EVENT_PRIMED,
+                               callbackTimeNs,
+                               availableFrames + discardedFrames,
+                               targetFrames,
+                               discardedFrames,
+                               requestedFrames,
+                               callbackNumber,
+                               callbackGapMicros,
+                               renderer->capacityFrames);
+    }
+
+    uint32_t copiedFrames = availableFrames < requestedFrames ? availableFrames : requestedFrames;
 
     if (copiedFrames > 0) {
         copyFromRing(renderer, output, readFrame, copiedFrames);
@@ -465,9 +503,6 @@ static void maybeStart(AAudioRenderer* renderer) {
     uint32_t readFrame = atomic_load_explicit(&renderer->readFrame, memory_order_acquire);
     uint32_t writeFrame = atomic_load_explicit(&renderer->writeFrame, memory_order_acquire);
     uint32_t targetFrames = atomic_load_explicit(&renderer->targetFrames, memory_order_acquire);
-    if (writeFrame - readFrame < targetFrames) {
-        return;
-    }
 
     bool expected = false;
     if (!atomic_compare_exchange_strong_explicit(&renderer->started, &expected, true,
@@ -512,7 +547,7 @@ static void maybeStart(AAudioRenderer* renderer) {
         LOGE("AAudio start failed: %d (%s)", result, resultText(result));
     }
     else {
-        LOGI("AAudio playback started with %u queued frames", writeFrame - readFrame);
+        LOGI("AAudio startup warm-up began with %u queued frames", writeFrame - readFrame);
     }
 }
 
@@ -878,12 +913,20 @@ static uint32_t writeFrames(AAudioRenderer* renderer, const int16_t* samples, ui
     uint32_t readFrame = atomic_load_explicit(&renderer->readFrame, memory_order_acquire);
     uint32_t writeFrame = atomic_load_explicit(&renderer->writeFrame, memory_order_relaxed);
     uint32_t queuedFrames = writeFrame - readFrame;
-    int playbackRatePpm = updateAdaptiveController(renderer, frames, queuedFrames);
+    bool primed = atomic_load_explicit(&renderer->primed, memory_order_acquire);
+    int playbackRatePpm = primed ?
+            updateAdaptiveController(renderer, frames, queuedFrames) : RATE_ONE_PPM;
+    if (!primed) {
+        atomic_store_explicit(&renderer->playbackRatePpm, RATE_ONE_PPM,
+                              memory_order_relaxed);
+    }
     const int16_t* adjustedSamples = samples;
     uint32_t adjustedFrames = stretchFrames(renderer, samples, frames, playbackRatePpm,
                                             &adjustedSamples);
-    uint32_t freeFrames = queuedFrames < renderer->capacityFrames ?
-            renderer->capacityFrames - queuedFrames : 0;
+    uint32_t queueLimitFrames = primed ?
+            renderer->steadyCapacityFrames : renderer->capacityFrames;
+    uint32_t freeFrames = queuedFrames < queueLimitFrames ?
+            queueLimitFrames - queuedFrames : 0;
     uint32_t acceptedFrames = adjustedFrames < freeFrames ? adjustedFrames : freeFrames;
 
     if (acceptedFrames > 0) {
@@ -904,7 +947,7 @@ static uint32_t writeFrames(AAudioRenderer* renderer, const int16_t* samples, ui
                                acceptedFrames,
                                droppedFrames,
                                queuedFrames,
-                               renderer->capacityFrames,
+                               queueLimitFrames,
                                atomic_load_explicit(&renderer->started,
                                                     memory_order_relaxed));
     }
@@ -1003,10 +1046,14 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
 
     // The ring owns jitter buffering. AAudio itself remains at a two-burst low-latency size.
     // Keep 100 ms of non-blocking producer headroom beyond the selected target.
-    uint32_t headroomFrames = (uint32_t)(((int64_t)sampleRate * 100) / 1000);
-    renderer->capacityFrames = renderer->maxTargetFrames + headroomFrames;
-    if (renderer->capacityFrames < (uint32_t)sampleRate / 10) {
-        renderer->capacityFrames = (uint32_t)sampleRate / 10;
+    uint32_t headroomFrames = framesForMs(renderer, RING_HEADROOM_MS);
+    renderer->steadyCapacityFrames = renderer->maxTargetFrames + headroomFrames;
+    if (renderer->steadyCapacityFrames < (uint32_t)sampleRate / 10) {
+        renderer->steadyCapacityFrames = (uint32_t)sampleRate / 10;
+    }
+    renderer->capacityFrames = framesForMs(renderer, STARTUP_CAPACITY_MS);
+    if (renderer->capacityFrames < renderer->steadyCapacityFrames) {
+        renderer->capacityFrames = renderer->steadyCapacityFrames;
     }
 
     renderer->ring = (int16_t*)calloc((size_t)renderer->capacityFrames * channelCount,
@@ -1028,6 +1075,7 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
     atomic_init(&renderer->targetFrames, initialTargetFrames);
     atomic_init(&renderer->armed, false);
     atomic_init(&renderer->started, false);
+    atomic_init(&renderer->primed, false);
     atomic_init(&renderer->closing, false);
     atomic_init(&renderer->underrunCallbacks, 0);
     atomic_init(&renderer->underrunFrames, 0);
@@ -1120,9 +1168,9 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
                            renderer->performanceMode,
                            renderer->sharingMode);
 
-    LOGI("AAudio opened: %d Hz, %d channels, target=%s, initial=40 ms, capacity=%u frames, burst=%d, mode=%d",
+    LOGI("AAudio opened: %d Hz, %d channels, target=%s, initial=40 ms, steady capacity=%u frames, startup capacity=%u frames, burst=%d, mode=%d",
          sampleRate, channelCount, renderer->adaptive ? "20-80 ms adaptive" : "40 ms fixed",
-         renderer->capacityFrames, renderer->framesPerBurst,
+         renderer->steadyCapacityFrames, renderer->capacityFrames, renderer->framesPerBurst,
          renderer->performanceMode);
     pthread_mutex_lock(&gDirectRendererMutex);
     gDirectRenderer = renderer;
@@ -1218,12 +1266,13 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeGetStats(
                                         memory_order_relaxed),
             (jlong)atomic_load_explicit(&renderer->maxCallbackGapMicros,
                                         memory_order_relaxed),
-            (jlong)renderer->capacityFrames,
+            (jlong)renderer->steadyCapacityFrames,
             (jlong)renderer->framesPerBurst,
             (jlong)renderer->bufferSizeFrames,
             (jlong)renderer->bufferCapacityFrames,
             (jlong)streamState,
             (jlong)atomic_load_explicit(&renderer->armed, memory_order_acquire),
+            (jlong)atomic_load_explicit(&renderer->primed, memory_order_acquire),
     };
     (*env)->SetLongArrayRegion(env, stats, 0, NATIVE_STATS_COUNT, values);
 }

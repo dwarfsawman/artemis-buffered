@@ -18,7 +18,7 @@ import com.limelight.nvstream.jni.MoonBridge;
 
 public class AndroidAudioRenderer implements AudioRenderer {
     private static final long STATS_LOG_INTERVAL_MS = 2000;
-    private static final int NATIVE_STATS_COUNT = 20;
+    private static final int NATIVE_STATS_COUNT = 21;
     private static final int NATIVE_DIAGNOSTIC_EVENT_WORDS = 9;
     private static final int NATIVE_DIAGNOSTIC_EVENT_CAPACITY = 128;
 
@@ -31,6 +31,7 @@ public class AndroidAudioRenderer implements AudioRenderer {
     private static final int NATIVE_EVENT_START_FAILED = 7;
     private static final int NATIVE_EVENT_STREAM_ERROR = 8;
     private static final int NATIVE_EVENT_DELIVERY_GAP = 9;
+    private static final int NATIVE_EVENT_PRIMED = 10;
 
     static {
         System.loadLibrary("moonlight-core");
@@ -175,6 +176,7 @@ public class AndroidAudioRenderer implements AudioRenderer {
                         "nativePcmPath", true,
                         "adaptive", adaptiveAudioBuffer,
                         "wsolaEnabled", adaptiveAudioBuffer,
+                        "startupWarmup", true,
                         "underrunRebuffering", false,
                         "initialTargetMs", 40,
                         "minimumTargetMs", minimumTargetMs,
@@ -360,7 +362,8 @@ public class AndroidAudioRenderer implements AudioRenderer {
                 "aaudioBufferFrames", nativeStats[16],
                 "aaudioBufferCapacityFrames", nativeStats[17],
                 "streamState", nativeStats[18],
-                "armed", nativeStats[19] != 0);
+                "armed", nativeStats[19] != 0,
+                "primed", nativeStats[20] != 0);
         LimeLog.info("AAudio jitter stats: queued=" + queuedMs +
                 " ms, target=" + targetMs +
                 " ms, rate=" + String.format("%.3f", playbackRate) +
@@ -371,6 +374,7 @@ public class AndroidAudioRenderer implements AudioRenderer {
                 " ms, stretchDeltaFrames=" + nativeStats[9] +
                 ", maxCallbackGap=" + String.format("%.2f", maximumCallbackGapMs) +
                 " ms, streamState=" + nativeStats[18] +
+                ", primed=" + (nativeStats[20] != 0) +
                 ", xrun=" + nativeStats[4] +
                 ", error=" + nativeStats[5]);
     }
@@ -563,6 +567,17 @@ public class AndroidAudioRenderer implements AudioRenderer {
                         "totalDeliveryGapEvents", value3,
                         "previousPacketFrames", value4,
                         "currentPacketFrames", value5);
+                break;
+            case NATIVE_EVENT_PRIMED:
+                diagnostics.recordAtElapsedRealtimeNanos("aaudio_primed",
+                        elapsedRealtimeNanos,
+                        "queuedFramesBeforeTrim", value0,
+                        "targetFrames", value1,
+                        "discardedStartupFrames", value2,
+                        "requestedFrames", value3,
+                        "callbackNumber", value4,
+                        "callbackGapUs", value5,
+                        "startupCapacityFrames", value6);
                 break;
             default:
                 diagnostics.recordAtElapsedRealtimeNanos("aaudio_unknown_event",

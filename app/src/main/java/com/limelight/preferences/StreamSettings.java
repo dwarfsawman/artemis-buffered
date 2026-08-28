@@ -700,7 +700,8 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
                         removeEntryFromListAndSetValue(PreferenceConfiguration.RESOLUTION_PREF_STRING, PreferenceConfiguration.RES_1440P, PreferenceConfiguration.RES_1080P);
                     }
                     if (maxSupportedResW < 1920) {
-                        // 1080p is unsupported
+                        // 1080p and 1920x1200 are unsupported
+                        removeEntryFromListAndSetValue(PreferenceConfiguration.RESOLUTION_PREF_STRING, PreferenceConfiguration.RES_1920_1200, PreferenceConfiguration.RES_720P);
                         removeEntryFromListAndSetValue(PreferenceConfiguration.RESOLUTION_PREF_STRING, PreferenceConfiguration.RES_1080P, PreferenceConfiguration.RES_720P);
                     }
                     // Never remove 720p

@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Random;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -67,6 +68,85 @@ public class InitialAaudioBaselineSimulationTest {
         assertEquals(35, fixedWithRebuffer.rebufferSilenceMs, 0.001);
         assertEquals(1, fixedNoRebuffer.startCount);
         assertEquals(2, fixedWithRebuffer.startCount);
+    }
+
+    @Test
+    public void startupWarmupMovesInitialCallbackStallBeforeAudiblePlayback() {
+        StartupResult delayedStart = simulateStartupCallbackStall(false);
+        StartupResult warmStart = simulateStartupCallbackStall(true);
+
+        // The original policy emits useful PCM from the first callback and then encounters the
+        // device's startup pause, overflowing the 140 ms steady-state ring during the cutout.
+        assertTrue(delayedStart.audibleBeforeCallbackStall);
+        assertTrue(delayedStart.droppedAudioMs > 1000);
+
+        // Starting AAudio when armed lets the same pause finish while callbacks still emit
+        // startup silence. A 2-second startup ring retains the input, then trims to the newest
+        // 40 ms so useful playback begins current and without a preceding audible fragment.
+        assertFalse(warmStart.audibleBeforeCallbackStall);
+        assertEquals(0, warmStart.droppedAudioMs);
+        assertTrue(warmStart.discardedStartupAudioMs > 800);
+        assertEquals(40, warmStart.queuedAtFirstAudibleCallbackMs);
+    }
+
+    private static StartupResult simulateStartupCallbackStall(boolean warmStart) {
+        final int packetStartMs = 500;
+        final int targetMs = 40;
+        final int steadyCapacityMs = 140;
+        final int startupCapacityMs = 2000;
+        final int callbackPeriodMs = 4;
+        final int streamStartMs = warmStart ? 0 : packetStartMs + targetMs - PACKET_MS;
+        final int firstCallbackMs = streamStartMs + 40;
+        final int callbackStallStartMs = firstCallbackMs + callbackPeriodMs;
+        final int callbackStallEndMs = callbackStallStartMs + 1400;
+
+        int queuedMs = warmStart ? 0 : targetMs;
+        int droppedAudioMs = 0;
+        int discardedStartupAudioMs = 0;
+        int queuedAtFirstAudibleCallbackMs = -1;
+        int firstAudibleCallbackMs = -1;
+        boolean primed = !warmStart;
+
+        for (int nowMs = 0; nowMs <= 2400; nowMs++) {
+            if (nowMs >= packetStartMs &&
+                    (nowMs - packetStartMs) % PACKET_MS == 0 &&
+                    (warmStart || nowMs > streamStartMs)) {
+                int capacityMs = primed ? steadyCapacityMs : startupCapacityMs;
+                int acceptedMs = Math.min(PACKET_MS, capacityMs - queuedMs);
+                queuedMs += acceptedMs;
+                droppedAudioMs += PACKET_MS - acceptedMs;
+            }
+
+            boolean callbackDue = nowMs == firstCallbackMs ||
+                    (nowMs >= callbackStallEndMs &&
+                            (nowMs - callbackStallEndMs) % callbackPeriodMs == 0);
+            if (!callbackDue) {
+                continue;
+            }
+
+            if (!primed) {
+                if (queuedMs < targetMs) {
+                    continue;
+                }
+                discardedStartupAudioMs += queuedMs - targetMs;
+                queuedMs = targetMs;
+                primed = true;
+            }
+
+            if (queuedMs > 0) {
+                if (firstAudibleCallbackMs < 0) {
+                    firstAudibleCallbackMs = nowMs;
+                    queuedAtFirstAudibleCallbackMs = queuedMs;
+                }
+                queuedMs = Math.max(0, queuedMs - callbackPeriodMs);
+            }
+        }
+
+        return new StartupResult(
+                firstAudibleCallbackMs >= 0 && firstAudibleCallbackMs < callbackStallStartMs,
+                droppedAudioMs,
+                discardedStartupAudioMs,
+                queuedAtFirstAudibleCallbackMs);
     }
 
     private static List<Double> createThirtyToSeventyMsRttTrace() {
@@ -162,6 +242,21 @@ public class InitialAaudioBaselineSimulationTest {
             this.averageBufferedMs = averageBufferedMs;
             this.firstPacketToStartMs = firstPacketToStartMs;
             this.startCount = startCount;
+        }
+    }
+
+    private static final class StartupResult {
+        final boolean audibleBeforeCallbackStall;
+        final int droppedAudioMs;
+        final int discardedStartupAudioMs;
+        final int queuedAtFirstAudibleCallbackMs;
+
+        StartupResult(boolean audibleBeforeCallbackStall, int droppedAudioMs,
+                      int discardedStartupAudioMs, int queuedAtFirstAudibleCallbackMs) {
+            this.audibleBeforeCallbackStall = audibleBeforeCallbackStall;
+            this.droppedAudioMs = droppedAudioMs;
+            this.discardedStartupAudioMs = discardedStartupAudioMs;
+            this.queuedAtFirstAudibleCallbackMs = queuedAtFirstAudibleCallbackMs;
         }
     }
 }

@@ -329,6 +329,7 @@
     <string name="resolution_480p">480p</string>
     <string name="resolution_720p">720p</string>
     <string name="resolution_1080p">1080p</string>
+    <string name="resolution_1920_1200">1920 × 1200</string>
     <string name="resolution_2158_1440">2158 × 1440</string>
     <string name="resolution_1440p">1440p</string>
     <string name="resolution_4k">4K</string>
