@@ -1,5 +1,6 @@
 package com.limelight.binding.input;
 
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.hardware.input.InputManager;
 import android.os.Build;
@@ -40,6 +41,8 @@ public class KeyboardTranslator implements InputManager.InputDeviceListener {
     public static final int VK_ESCAPE = 27;
     public static final int VK_F1 = 112;
     public static final int VK_F12 = 123;
+    public static final int VK_F13 = 124;
+    public static final int VK_F24 = 135;
 
     public static final int VK_END = 35;
     public static final int VK_HOME = 36;
@@ -180,6 +183,7 @@ public class KeyboardTranslator implements InputManager.InputDeviceListener {
      * @param deviceId InputDevice.getId() or -1 if unknown
      * @return a GFE keycode for the given keycode
      */
+    @SuppressLint("InlinedApi") // API 36 key constants are inlined and safe on older Android versions.
     public short translate(int keycode, int scancode, int deviceId) {
         int translated;
 
@@ -215,6 +219,10 @@ public class KeyboardTranslator implements InputManager.InputDeviceListener {
         else if (keycode >= KeyEvent.KEYCODE_F1 &&
                  keycode <= KeyEvent.KEYCODE_F12) {
             translated = (keycode - KeyEvent.KEYCODE_F1) + VK_F1;
+        }
+        else if (keycode >= KeyEvent.KEYCODE_F13 &&
+                 keycode <= KeyEvent.KEYCODE_F24) {
+            translated = (keycode - KeyEvent.KEYCODE_F13) + VK_F13;
         }
         else {
             switch (keycode) {
