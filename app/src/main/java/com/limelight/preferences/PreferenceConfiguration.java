@@ -74,6 +74,7 @@ public class PreferenceConfiguration {
     public static final String ENABLE_AUDIO_DIAGNOSTICS_PREF_STRING = "checkbox_enable_audio_diagnostics";
     public static final String ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING = "checkbox_enable_callback_audio_buffer";
     public static final String ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING = "checkbox_enable_adaptive_audio_buffer";
+    public static final String FIXED_AUDIO_BUFFER_MS_PREF_STRING = "seekbar_fixed_audio_buffer_ms";
     private static final String BIND_ALL_USB_STRING = "checkbox_usb_bind_all";
     private static final String MOUSE_EMULATION_STRING = "checkbox_mouse_emulation";
     private static final String ANALOG_SCROLLING_PREF_STRING = "analog_scrolling";
@@ -166,6 +167,9 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_ENABLE_AUDIO_DIAGNOSTICS = false;
     private static final boolean DEFAULT_ENABLE_CALLBACK_AUDIO_BUFFER = false;
     private static final boolean DEFAULT_ENABLE_ADAPTIVE_AUDIO_BUFFER = false;
+    public static final int MIN_FIXED_AUDIO_BUFFER_MS = 40;
+    public static final int DEFAULT_FIXED_AUDIO_BUFFER_MS = 40;
+    public static final int MAX_FIXED_AUDIO_BUFFER_MS = 120;
     private static final boolean DEFAULT_BIND_ALL_USB = false;
     private static final boolean DEFAULT_MOUSE_EMULATION = true;
     private static final String DEFAULT_ANALOG_STICK_FOR_SCROLLING = "right";
@@ -264,6 +268,7 @@ public class PreferenceConfiguration {
     public boolean enableAudioDiagnostics;
     public boolean enableCallbackAudioBuffer;
     public boolean enableAdaptiveAudioBuffer;
+    public int fixedAudioBufferMs;
     //简化版性能信息
     public boolean enablePerfOverlayLite;
 
@@ -901,6 +906,7 @@ public class PreferenceConfiguration {
         config.enableAudioDiagnostics = isAudioDiagnosticsEnabled(prefs);
         config.enableCallbackAudioBuffer = isCallbackAudioBufferEnabled(prefs);
         config.enableAdaptiveAudioBuffer = isAdaptiveAudioBufferEnabled(prefs);
+        config.fixedAudioBufferMs = getFixedAudioBufferMs(prefs);
         config.enablePerfOverlayLite = prefs.getBoolean("checkbox_enable_perf_overlay_lite",DEFAULT_ENABLE_PERF_OVERLAY);
         config.enablePerfOverlayBottom = prefs.getBoolean("checkbox_enable_perf_overlay_bottom",DEFAULT_PERF_OVERLAY_BOTTOM);
         config.bindAllUsb = prefs.getBoolean(BIND_ALL_USB_STRING, DEFAULT_BIND_ALL_USB);
@@ -1025,5 +1031,12 @@ public class PreferenceConfiguration {
         return isCallbackAudioBufferEnabled(prefs) &&
                 prefs.getBoolean(ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING,
                 DEFAULT_ENABLE_ADAPTIVE_AUDIO_BUFFER);
+    }
+
+    static int getFixedAudioBufferMs(SharedPreferences prefs) {
+        int value = prefs.getInt(FIXED_AUDIO_BUFFER_MS_PREF_STRING,
+                DEFAULT_FIXED_AUDIO_BUFFER_MS);
+        return Math.max(MIN_FIXED_AUDIO_BUFFER_MS,
+                Math.min(MAX_FIXED_AUDIO_BUFFER_MS, value));
     }
 }

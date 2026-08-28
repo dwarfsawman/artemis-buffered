@@ -8,6 +8,10 @@ import android.widget.FrameLayout;
 
 import com.limelight.R;
 
+import androidx.preference.Preference;
+import androidx.preference.PreferenceManager;
+import androidx.test.core.app.ApplicationProvider;
+
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -31,8 +35,11 @@ public class StreamSettingsTouchTest {
 
     @Before
     public void setUp() {
+        PreferenceManager.getDefaultSharedPreferences(
+                ApplicationProvider.getApplicationContext()).edit().clear().commit();
         activityController = Robolectric.buildActivity(StreamSettings.class).setup();
         activity = activityController.get();
+        activity.getSupportFragmentManager().executePendingTransactions();
     }
 
     @After
@@ -56,6 +63,43 @@ public class StreamSettingsTouchTest {
         dispatchDown(harness.carouselBounds.centerX(), harness.carouselBounds.centerY());
 
         assertTrue(harness.editor.hasFocus());
+    }
+
+    @Test
+    public void fixedBufferSliderFollowsCallbackAndAdaptiveToggles() {
+        StreamSettings.SettingsFragment fragment = (StreamSettings.SettingsFragment)
+                activity.getSupportFragmentManager().findFragmentById(R.id.stream_settings);
+        assertTrue(fragment != null);
+
+        ArtemisSwitchPreference callback = fragment.findPreference(
+                PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING);
+        ArtemisSwitchPreference adaptive = fragment.findPreference(
+                PreferenceConfiguration.ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING);
+        Preference fixedBuffer = fragment.findPreference(
+                PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING);
+        assertTrue(callback != null);
+        assertTrue(adaptive != null);
+        assertTrue(fixedBuffer != null);
+        assertFalse(fixedBuffer.isVisible());
+
+        assertTrue(callback.getOnPreferenceChangeListener()
+                .onPreferenceChange(callback, true));
+        callback.setChecked(true);
+        assertTrue(fixedBuffer.isVisible());
+
+        assertTrue(adaptive.getOnPreferenceChangeListener()
+                .onPreferenceChange(adaptive, true));
+        adaptive.setChecked(true);
+        assertFalse(fixedBuffer.isVisible());
+
+        assertTrue(adaptive.getOnPreferenceChangeListener()
+                .onPreferenceChange(adaptive, false));
+        adaptive.setChecked(false);
+        assertTrue(fixedBuffer.isVisible());
+
+        assertTrue(callback.getOnPreferenceChangeListener()
+                .onPreferenceChange(callback, false));
+        assertFalse(fixedBuffer.isVisible());
     }
 
     private TouchHarness createTouchHarness() {

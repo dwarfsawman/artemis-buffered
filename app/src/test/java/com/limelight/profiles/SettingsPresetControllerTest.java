@@ -49,6 +49,7 @@ public class SettingsPresetControllerTest {
                 .putStringSet(STRING_SET_KEY,
                         new HashSet<>(Arrays.asList("alpha", "beta")))
                 .putBoolean(PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING, true)
+                .putInt(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 80)
                 .commit();
 
         deleteRecursively(new File(context.getFilesDir(), "profiles"));
@@ -61,7 +62,8 @@ public class SettingsPresetControllerTest {
                 BITRATE_KEY,
                 UNSET_KEY,
                 STRING_SET_KEY,
-                PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING));
+                PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING,
+                PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING));
         controller = new SettingsPresetController(context, settings, managedKeys);
     }
 
@@ -88,6 +90,7 @@ public class SettingsPresetControllerTest {
                 .putString(FPS_KEY, "60")
                 .putInt(BITRATE_KEY, 25000)
                 .putBoolean(PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING, false)
+                .putInt(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 120)
                 .commit();
         assertTrue(controller.isDirty(preset));
 
@@ -98,13 +101,20 @@ public class SettingsPresetControllerTest {
         assertEquals(40000, settings.getInt(BITRATE_KEY, 0));
         assertTrue(settings.getBoolean(
                 PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING, false));
+        assertEquals(80, settings.getInt(
+                PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 0));
         assertFalse(controller.isDirty(preset));
 
-        settings.edit().putInt(BITRATE_KEY, 50000).commit();
+        settings.edit()
+                .putInt(BITRATE_KEY, 50000)
+                .putInt(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 100)
+                .commit();
         controller.savePreset(preset);
         assertFalse(controller.isDirty(preset));
         assertEquals(50000, ((Number) controller.getEffectiveValue(
                 preset, BITRATE_KEY)).intValue());
+        assertEquals(100, ((Number) controller.getEffectiveValue(
+                preset, PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)).intValue());
     }
 
     @Test
@@ -152,7 +162,8 @@ public class SettingsPresetControllerTest {
         assertTrue(reloadedManager.load(context));
         controller = new SettingsPresetController(context, settings, new HashSet<>(Arrays.asList(
                 RESOLUTION_KEY, FPS_KEY, BITRATE_KEY, UNSET_KEY, STRING_SET_KEY,
-                PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING)));
+                PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING,
+                PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)));
         SettingsProfile reloaded = controller.getPresets().get(0);
 
         assertEquals(new HashSet<>(Arrays.asList("alpha", "beta")),

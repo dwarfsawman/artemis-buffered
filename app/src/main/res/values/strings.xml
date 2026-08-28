@@ -463,10 +463,12 @@
     <string name="settings_preset_delete_confirmation">Delete \"%1$s\"?</string>
     <string name="settings_preset_delete">Delete</string>
     <string name="settings_preset_deleted">Deleted %1$s</string>
-    <string name="title_checkbox_enable_callback_audio_buffer">Fixed 40 ms callback audio buffer</string>
-    <string name="summary_checkbox_enable_callback_audio_buffer">Off (default): use the original AudioTrack behavior from the cloned repository. On: use the fixed 40 ms AAudio callback + SPSC ring on Android 8.1+ and enable the adaptive option below. Audio effects continue to use AudioTrack.</string>
+    <string name="title_checkbox_enable_callback_audio_buffer">Callback audio buffer</string>
+    <string name="summary_checkbox_enable_callback_audio_buffer">Off (default): use the original AudioTrack behavior from the cloned repository. On: use an AAudio callback + SPSC ring on Android 8.1+ and show the fixed-buffer control below. Audio effects continue to use AudioTrack.</string>
+    <string name="title_seekbar_fixed_audio_buffer_ms">Fixed audio buffer (ms)</string>
+    <string name="summary_seekbar_fixed_audio_buffer_ms">Choose 40–120 ms in 10 ms steps. A larger buffer is more resistant to interruptions, but adds audio latency. This value is used only when adaptive mode is off.</string>
     <string name="title_checkbox_enable_adaptive_audio_buffer">Adaptive 20–80 ms + WSOLA-style processing</string>
-    <string name="summary_checkbox_enable_adaptive_audio_buffer">Requires the fixed callback audio buffer above. Off: fixed 40 ms without WSOLA. On: adaptive 20–80 ms target with WSOLA-style time stretching. Neither mode re-buffers after an underrun.</string>
+    <string name="summary_checkbox_enable_adaptive_audio_buffer">Requires the callback audio buffer above. Off: use the selected fixed buffer without WSOLA. On: adaptive 20–80 ms target with WSOLA-style time stretching. Neither mode re-buffers after an underrun.</string>
     <string name="title_share_audio_diagnostic_logs">Share audio diagnostic logs</string>
     <string name="summary_share_audio_diagnostic_logs">Export recent audio session logs as a ZIP file for analysis</string>
     <string name="toast_no_audio_diagnostic_logs">No audio diagnostic logs have been recorded yet</string>

@@ -24,6 +24,18 @@
             android:title="@string/title_checkbox_enable_callback_audio_buffer"
             app:iconSpaceReserved="false" />
 
+        <com.limelight.preferences.ArtemisSeekBarPreference
+            android:defaultValue="40"
+            android:key="seekbar_fixed_audio_buffer_ms"
+            android:max="120"
+            android:summary="@string/summary_seekbar_fixed_audio_buffer_ms"
+            android:title="@string/title_seekbar_fixed_audio_buffer_ms"
+            app:iconSpaceReserved="false"
+            app:min="40"
+            app:seekBarIncrement="10"
+            app:showSeekBarValue="true"
+            app:updatesContinuously="true" />
+
         <com.limelight.preferences.ArtemisSwitchPreference
             android:defaultValue="false"
             android:dependency="checkbox_enable_callback_audio_buffer"

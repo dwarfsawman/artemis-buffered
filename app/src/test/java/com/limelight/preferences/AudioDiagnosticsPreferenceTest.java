@@ -1,5 +1,6 @@
 package com.limelight.preferences;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -61,5 +62,32 @@ public class AudioDiagnosticsPreferenceTest {
                 .putBoolean(PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING, true)
                 .commit();
         assertTrue(PreferenceConfiguration.isAdaptiveAudioBufferEnabled(preferences));
+    }
+
+    @Test
+    public void fixedAudioBufferDefaultsTo40AndIsClampedToSliderRange() {
+        Context context = ApplicationProvider.getApplicationContext();
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        preferences.edit().clear().commit();
+
+        assertEquals(PreferenceConfiguration.DEFAULT_FIXED_AUDIO_BUFFER_MS,
+                PreferenceConfiguration.getFixedAudioBufferMs(preferences));
+
+        preferences.edit()
+                .putInt(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 120)
+                .commit();
+        assertEquals(120, PreferenceConfiguration.getFixedAudioBufferMs(preferences));
+
+        preferences.edit()
+                .putInt(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 20)
+                .commit();
+        assertEquals(PreferenceConfiguration.MIN_FIXED_AUDIO_BUFFER_MS,
+                PreferenceConfiguration.getFixedAudioBufferMs(preferences));
+
+        preferences.edit()
+                .putInt(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 200)
+                .commit();
+        assertEquals(PreferenceConfiguration.MAX_FIXED_AUDIO_BUFFER_MS,
+                PreferenceConfiguration.getFixedAudioBufferMs(preferences));
     }
 }

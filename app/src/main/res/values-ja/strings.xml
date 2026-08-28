@@ -211,10 +211,12 @@
     <string name="settings_preset_delete_confirmation">「%1$s」を削除しますか？</string>
     <string name="settings_preset_delete">削除</string>
     <string name="settings_preset_deleted">%1$sを削除しました</string>
-    <string name="title_checkbox_enable_callback_audio_buffer">固定40 msコールバック音声バッファ</string>
-    <string name="summary_checkbox_enable_callback_audio_buffer">オフ（既定）：このリポジトリのクローン時と同じAudioTrack動作。オン：Android 8.1以降でAAudioコールバック＋固定40 ms SPSCリングを使用し、下の適応設定を有効にします。音声エフェクト有効時はAudioTrackを使用します。</string>
+    <string name="title_checkbox_enable_callback_audio_buffer">コールバック音声バッファ</string>
+    <string name="summary_checkbox_enable_callback_audio_buffer">オフ（既定）：このリポジトリのクローン時と同じAudioTrack動作。オン：Android 8.1以降でAAudioコールバック＋SPSCリングを使用し、下に固定バッファ量を表示します。音声エフェクト有効時はAudioTrackを使用します。</string>
+    <string name="title_seekbar_fixed_audio_buffer_ms">固定音声バッファ量（ms）</string>
+    <string name="summary_seekbar_fixed_audio_buffer_ms">40～120 msを10 ms刻みで選択します。大きくすると音声の途切れに強くなる一方、音声遅延が増えます。適応モードがオフのときだけ使用されます。</string>
     <string name="title_checkbox_enable_adaptive_audio_buffer">適応20～80 ms＋WSOLA型処理</string>
-    <string name="summary_checkbox_enable_adaptive_audio_buffer">上の固定コールバック音声バッファを有効にすると設定できます。オフ：固定40 ms、WSOLAなし。オン：適応20～80 ms＋WSOLA型の時間伸縮。どちらもアンダーラン後の再バッファリングは行いません。</string>
+    <string name="summary_checkbox_enable_adaptive_audio_buffer">上のコールバック音声バッファを有効にすると設定できます。オフ：スライダーで選んだ固定バッファ、WSOLAなし。オン：適応20～80 ms＋WSOLA型の時間伸縮。どちらもアンダーラン後の再バッファリングは行いません。</string>
     <string name="title_share_audio_diagnostic_logs">音声診断ログを共有</string>
     <string name="summary_share_audio_diagnostic_logs">最近の音声セッションログを分析用のZIPファイルとして書き出します</string>
     <string name="toast_no_audio_diagnostic_logs">音声診断ログはまだ記録されていません</string>

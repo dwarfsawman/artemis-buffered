@@ -450,6 +450,34 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
                 }
             }
 
+            ArtemisSwitchPreference callbackAudioBufferPreference = findPreference(
+                    PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING);
+            ArtemisSwitchPreference adaptiveAudioBufferPreference = findPreference(
+                    PreferenceConfiguration.ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING);
+            Preference fixedAudioBufferPreference = findPreference(
+                    PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING);
+            if (callbackAudioBufferPreference != null &&
+                    adaptiveAudioBufferPreference != null &&
+                    fixedAudioBufferPreference != null) {
+                fixedAudioBufferPreference.setVisible(
+                        callbackAudioBufferPreference.isChecked() &&
+                                !adaptiveAudioBufferPreference.isChecked());
+                callbackAudioBufferPreference.setOnPreferenceChangeListener(
+                        (preference, newValue) -> {
+                            fixedAudioBufferPreference.setVisible(
+                                    (Boolean) newValue &&
+                                            !adaptiveAudioBufferPreference.isChecked());
+                            return true;
+                        });
+                adaptiveAudioBufferPreference.setOnPreferenceChangeListener(
+                        (preference, newValue) -> {
+                            fixedAudioBufferPreference.setVisible(
+                                    callbackAudioBufferPreference.isChecked() &&
+                                            !(Boolean) newValue);
+                            return true;
+                        });
+            }
+
             AppCompatActivity activity = (AppCompatActivity) requireActivity();
             PackageManager pm = activity.getPackageManager();
 

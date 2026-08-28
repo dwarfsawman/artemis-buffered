@@ -15,6 +15,7 @@ import android.os.SystemClock;
 import com.limelight.LimeLog;
 import com.limelight.nvstream.av.audio.AudioRenderer;
 import com.limelight.nvstream.jni.MoonBridge;
+import com.limelight.preferences.PreferenceConfiguration;
 
 public class AndroidAudioRenderer implements AudioRenderer {
     private static final long STATS_LOG_INTERVAL_MS = 2000;
@@ -41,6 +42,7 @@ public class AndroidAudioRenderer implements AudioRenderer {
     private final boolean enableAudioFx;
     private final boolean callbackAudioBuffer;
     private final boolean adaptiveAudioBuffer;
+    private final int fixedAudioBufferMs;
     private final AudioDiagnosticsLogger diagnostics;
     private final long[] nativeStats = new long[NATIVE_STATS_COUNT];
     private final long[] nativeDiagnosticEvents =
@@ -77,11 +79,14 @@ public class AndroidAudioRenderer implements AudioRenderer {
 
     public AndroidAudioRenderer(Context context, boolean enableAudioFx,
                                 boolean enableAudioDiagnostics, boolean callbackAudioBuffer,
-                                boolean adaptiveAudioBuffer) {
+                                boolean adaptiveAudioBuffer, int fixedAudioBufferMs) {
         this.context = context;
         this.enableAudioFx = enableAudioFx;
         this.callbackAudioBuffer = callbackAudioBuffer;
         this.adaptiveAudioBuffer = callbackAudioBuffer && adaptiveAudioBuffer;
+        this.fixedAudioBufferMs = Math.max(PreferenceConfiguration.MIN_FIXED_AUDIO_BUFFER_MS,
+                Math.min(PreferenceConfiguration.MAX_FIXED_AUDIO_BUFFER_MS,
+                        fixedAudioBufferMs));
         this.diagnostics = enableAudioDiagnostics ? AudioDiagnosticsLogger.start(context) : null;
     }
 
@@ -91,7 +96,8 @@ public class AndroidAudioRenderer implements AudioRenderer {
     }
 
     private static native long nativeCreate(int sampleRate, int channelCount, int samplesPerFrame,
-                                            boolean adaptive, boolean diagnosticsEnabled);
+                                            int fixedTargetMs, boolean adaptive,
+                                            boolean diagnosticsEnabled);
     private static native void nativeArm(long handle);
     private static native int nativeWrite(long handle, short[] audioData);
     private static native void nativeGetStats(long handle, long[] stats);
@@ -150,6 +156,7 @@ public class AndroidAudioRenderer implements AudioRenderer {
                 "samplesPerFrame", samplesPerFrame,
                 "audioFxEnabled", enableAudioFx,
                 "callbackAudioBufferEnabled", callbackAudioBuffer,
+                "fixedTargetMs", fixedAudioBufferMs,
                 "selectedBufferMode", getSelectedBufferMode(),
                 "aaudioEligible", callbackAudioBuffer &&
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && !enableAudioFx,
@@ -160,15 +167,18 @@ public class AndroidAudioRenderer implements AudioRenderer {
         if (callbackAudioBuffer &&
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && !enableAudioFx) {
             nativeRenderer = nativeCreate(sampleRate, channelCount, samplesPerFrame,
+                    fixedAudioBufferMs,
                     adaptiveAudioBuffer,
                     diagnostics != null);
             if (nativeRenderer != 0) {
-                int minimumTargetMs = adaptiveAudioBuffer ? 20 : 40;
-                int maximumTargetMs = adaptiveAudioBuffer ? 80 : 40;
+                int initialTargetMs = adaptiveAudioBuffer ? 40 : fixedAudioBufferMs;
+                int minimumTargetMs = adaptiveAudioBuffer ? 20 : fixedAudioBufferMs;
+                int maximumTargetMs = adaptiveAudioBuffer ? 80 : fixedAudioBufferMs;
                 LimeLog.info(adaptiveAudioBuffer ?
                         "Using adaptive callback AAudio renderer: 20-80 ms target, " +
                                 "initial=40 ms, WSOLA rate=0.97-1.03, no underrun rebuffering" :
-                        "Using fixed callback AAudio renderer: 40 ms SPSC ring, " +
+                        "Using fixed callback AAudio renderer: " + fixedAudioBufferMs +
+                                " ms SPSC ring, " +
                                 "no WSOLA, no underrun rebuffering");
                 recordDiagnostic("renderer_started",
                         "renderer", "AAudio",
@@ -178,7 +188,7 @@ public class AndroidAudioRenderer implements AudioRenderer {
                         "wsolaEnabled", adaptiveAudioBuffer,
                         "startupWarmup", true,
                         "underrunRebuffering", false,
-                        "initialTargetMs", 40,
+                        "initialTargetMs", initialTargetMs,
                         "minimumTargetMs", minimumTargetMs,
                         "maximumTargetMs", maximumTargetMs);
                 startNativeStatsPolling();
@@ -273,7 +283,8 @@ public class AndroidAudioRenderer implements AudioRenderer {
         if (!callbackAudioBuffer) {
             return "legacy_audio_track";
         }
-        return adaptiveAudioBuffer ? "adaptive_20_80ms_wsola" : "fixed_40ms";
+        return adaptiveAudioBuffer ? "adaptive_20_80ms_wsola" :
+                "fixed_" + fixedAudioBufferMs + "ms";
     }
 
     @Override

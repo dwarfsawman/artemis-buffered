@@ -35,6 +35,7 @@ import java.util.Map;
 @RunWith(RobolectricTestRunner.class)
 public class ArtemisSettingsAppearanceTest {
     private static final String ANDROID_NS = "http://schemas.android.com/apk/res/android";
+    private static final String APP_NS = "http://schemas.android.com/apk/res-auto";
 
     @Test
     public void resolutionListIncludes1920By1200() {
@@ -85,6 +86,8 @@ public class ArtemisSettingsAppearanceTest {
                 customTags.get(PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING));
         assertEquals("com.limelight.preferences.ArtemisSwitchPreference",
                 customTags.get(PreferenceConfiguration.ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING));
+        assertEquals("com.limelight.preferences.ArtemisSeekBarPreference",
+                customTags.get(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING));
         assertEquals("com.limelight.preferences.ArtemisSwitchPreference",
                 customTags.get(PreferenceConfiguration.ENABLE_AUDIO_DIAGNOSTICS_PREF_STRING));
         assertEquals("com.limelight.preferences.ArtemisPreference",
@@ -114,6 +117,35 @@ public class ArtemisSettingsAppearanceTest {
         }
 
         throw new AssertionError("Adaptive audio buffer preference was not found");
+    }
+
+    @Test
+    public void fixedAudioBufferSliderUses40To120Range() throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+
+        try (XmlResourceParser parser = context.getResources().getXml(R.xml.preferences)) {
+            int event;
+            while ((event = parser.next()) != XmlPullParser.END_DOCUMENT) {
+                if (event != XmlPullParser.START_TAG) {
+                    continue;
+                }
+
+                String key = parser.getAttributeValue(ANDROID_NS, "key");
+                if (PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING.equals(key)) {
+                    assertEquals(PreferenceConfiguration.DEFAULT_FIXED_AUDIO_BUFFER_MS,
+                            parser.getAttributeIntValue(ANDROID_NS, "defaultValue", -1));
+                    assertEquals(PreferenceConfiguration.MIN_FIXED_AUDIO_BUFFER_MS,
+                            parser.getAttributeIntValue(APP_NS, "min", -1));
+                    assertEquals(PreferenceConfiguration.MAX_FIXED_AUDIO_BUFFER_MS,
+                            parser.getAttributeIntValue(ANDROID_NS, "max", -1));
+                    assertEquals(10,
+                            parser.getAttributeIntValue(APP_NS, "seekBarIncrement", -1));
+                    return;
+                }
+            }
+        }
+
+        throw new AssertionError("Fixed audio buffer slider was not found");
     }
 
     @Test

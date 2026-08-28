@@ -1,9 +1,11 @@
 #include <aaudio/AAudio.h>
 #include <android/log.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include <jni.h>
 #include <math.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -79,6 +81,7 @@ typedef struct {
     uint32_t stretchCapacityFrames;
     uint32_t minTargetFrames;
     uint32_t maxTargetFrames;
+    uint32_t fixedTargetMs;
     int32_t sampleRate;
     int32_t channelCount;
     bool adaptive;
@@ -103,6 +106,8 @@ typedef struct {
     atomic_bool started;
     atomic_bool primed;
     atomic_bool closing;
+    atomic_bool recoveryRequested;
+    atomic_bool recovering;
     atomic_uint underrunCallbacks;
     atomic_uint underrunFrames;
     atomic_uint droppedFrames;
@@ -122,10 +127,17 @@ typedef struct {
     atomic_uint diagnosticEventWriteSequence;
     atomic_uint diagnosticEventReadSequence;
     AudioDiagnosticEvent diagnosticEvents[DIAGNOSTIC_EVENT_CAPACITY];
+    pthread_mutex_t streamMutex;
+    sem_t recoverySemaphore;
+    pthread_t recoveryThread;
+    bool streamMutexInitialized;
+    bool recoverySemaphoreInitialized;
+    bool recoveryThreadStarted;
 } AAudioRenderer;
 
 enum {
-    FIXED_TARGET_MS = 40,
+    MIN_FIXED_TARGET_MS = 40,
+    MAX_FIXED_TARGET_MS = 120,
     MIN_TARGET_MS = 20,
     INITIAL_TARGET_MS = 40,
     MAX_TARGET_MS = 80,
@@ -490,13 +502,44 @@ static void errorCallback(AAudioStream* stream, void* userData, aaudio_result_t 
                                error,
                                AAUDIO_STREAM_STATE_DISCONNECTED,
                                0, 0, 0, 0, 0);
+
+        // AAudio forbids closing or reopening a disconnected stream from its callback thread.
+        // Wake the renderer-owned worker instead. Coalescing repeated callbacks also avoids
+        // racing multiple recovery attempts against the same stream.
+        if (!atomic_load_explicit(&renderer->closing, memory_order_acquire)) {
+            bool expected = false;
+            if (atomic_compare_exchange_strong_explicit(
+                        &renderer->recoveryRequested,
+                        &expected,
+                        true,
+                        memory_order_acq_rel,
+                        memory_order_acquire)) {
+                sem_post(&renderer->recoverySemaphore);
+            }
+        }
     }
     LOGE("AAudio stream error: %d (%s)", error, resultText(error));
 }
 
 static void maybeStart(AAudioRenderer* renderer) {
     if (!atomic_load_explicit(&renderer->armed, memory_order_acquire) ||
-        atomic_load_explicit(&renderer->closing, memory_order_acquire)) {
+        atomic_load_explicit(&renderer->closing, memory_order_acquire) ||
+        atomic_load_explicit(&renderer->recoveryRequested, memory_order_acquire) ||
+        atomic_load_explicit(&renderer->recovering, memory_order_acquire) ||
+        atomic_load_explicit(&renderer->streamState, memory_order_acquire) ==
+                AAUDIO_STREAM_STATE_DISCONNECTED) {
+        return;
+    }
+
+    pthread_mutex_lock(&renderer->streamMutex);
+    if (renderer->stream == NULL ||
+        !atomic_load_explicit(&renderer->armed, memory_order_acquire) ||
+        atomic_load_explicit(&renderer->closing, memory_order_acquire) ||
+        atomic_load_explicit(&renderer->recoveryRequested, memory_order_acquire) ||
+        atomic_load_explicit(&renderer->recovering, memory_order_acquire) ||
+        atomic_load_explicit(&renderer->streamState, memory_order_acquire) ==
+                AAUDIO_STREAM_STATE_DISCONNECTED) {
+        pthread_mutex_unlock(&renderer->streamMutex);
         return;
     }
 
@@ -507,6 +550,7 @@ static void maybeStart(AAudioRenderer* renderer) {
     bool expected = false;
     if (!atomic_compare_exchange_strong_explicit(&renderer->started, &expected, true,
                                                   memory_order_acq_rel, memory_order_acquire)) {
+        pthread_mutex_unlock(&renderer->streamMutex);
         return;
     }
 
@@ -549,6 +593,192 @@ static void maybeStart(AAudioRenderer* renderer) {
     else {
         LOGI("AAudio startup warm-up began with %u queued frames", writeFrame - readFrame);
     }
+    pthread_mutex_unlock(&renderer->streamMutex);
+}
+
+static void closeStreamLocked(AAudioRenderer* renderer) {
+    AAudioStream* stream = renderer->stream;
+    if (stream == NULL) {
+        return;
+    }
+
+    renderer->stream = NULL;
+    bool wasStarted = atomic_exchange_explicit(&renderer->started, false,
+                                                memory_order_acq_rel);
+    if (wasStarted) {
+        aaudio_result_t stopResult = gApi.streamRequestStop(stream);
+        if (stopResult != AAUDIO_OK) {
+            LOGW("AAudio stop failed: %d (%s)", stopResult, resultText(stopResult));
+        }
+    }
+
+    aaudio_result_t closeResult = gApi.streamClose(stream);
+    if (closeResult != AAUDIO_OK) {
+        LOGW("AAudio close failed: %d (%s)", closeResult, resultText(closeResult));
+    }
+    atomic_store_explicit(&renderer->streamState, AAUDIO_STREAM_STATE_UNINITIALIZED,
+                          memory_order_release);
+}
+
+static aaudio_result_t openStreamLocked(AAudioRenderer* renderer) {
+    AAudioStreamBuilder* builder = NULL;
+    aaudio_result_t result = gApi.createStreamBuilder(&builder);
+    if (result != AAUDIO_OK || builder == NULL) {
+        LOGE("AAudio builder creation failed: %d (%s)", result, resultText(result));
+        return result != AAUDIO_OK ? result : AAUDIO_ERROR_INTERNAL;
+    }
+
+    gApi.builderSetDirection(builder, AAUDIO_DIRECTION_OUTPUT);
+    gApi.builderSetSharingMode(builder, AAUDIO_SHARING_MODE_SHARED);
+    gApi.builderSetPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+    gApi.builderSetFormat(builder, AAUDIO_FORMAT_PCM_I16);
+    gApi.builderSetSampleRate(builder, renderer->sampleRate);
+    gApi.builderSetChannelCount(builder, renderer->channelCount);
+    if (gApi.builderSetUsage != NULL) {
+        gApi.builderSetUsage(builder, AAUDIO_USAGE_GAME);
+    }
+    if (gApi.builderSetContentType != NULL) {
+        gApi.builderSetContentType(builder, AAUDIO_CONTENT_TYPE_MUSIC);
+    }
+    gApi.builderSetDataCallback(builder, dataCallback, renderer);
+    gApi.builderSetErrorCallback(builder, errorCallback, renderer);
+
+    AAudioStream* stream = NULL;
+    result = gApi.builderOpenStream(builder, &stream);
+    gApi.builderDelete(builder);
+    if (result != AAUDIO_OK || stream == NULL) {
+        LOGE("AAudio stream open failed: %d (%s)", result, resultText(result));
+        if (stream != NULL) {
+            gApi.streamClose(stream);
+        }
+        return result != AAUDIO_OK ? result : AAUDIO_ERROR_INTERNAL;
+    }
+
+    int32_t actualSampleRate = gApi.streamGetSampleRate(stream);
+    int32_t actualChannelCount = gApi.streamGetChannelCount(stream);
+    aaudio_format_t actualFormat = gApi.streamGetFormat(stream);
+    if (actualSampleRate != renderer->sampleRate ||
+        actualChannelCount != renderer->channelCount ||
+        actualFormat != AAUDIO_FORMAT_PCM_I16) {
+        LOGW("AAudio format mismatch: requested %d Hz/%d ch/I16, got %d Hz/%d ch/%d",
+             renderer->sampleRate, renderer->channelCount,
+             actualSampleRate, actualChannelCount, actualFormat);
+        gApi.streamClose(stream);
+        return AAUDIO_ERROR_INVALID_FORMAT;
+    }
+
+    renderer->framesPerBurst = gApi.streamGetFramesPerBurst(stream);
+    if (renderer->framesPerBurst > 0) {
+        aaudio_result_t bufferResult =
+                gApi.streamSetBufferSizeInFrames(stream, renderer->framesPerBurst * 2);
+        if (bufferResult < 0) {
+            LOGW("Unable to set two-burst AAudio buffer: %d (%s)",
+                 bufferResult, resultText(bufferResult));
+        }
+    }
+    renderer->bufferSizeFrames = gApi.streamGetBufferSizeInFrames(stream);
+    renderer->bufferCapacityFrames = gApi.streamGetBufferCapacityInFrames(stream);
+    renderer->performanceMode = gApi.streamGetPerformanceMode(stream);
+    renderer->sharingMode = gApi.streamGetSharingMode(stream);
+    renderer->stream = stream;
+    atomic_store_explicit(&renderer->streamState, gApi.streamGetState(stream),
+                          memory_order_release);
+
+    enqueueDiagnosticEvent(renderer,
+                           DIAGNOSTIC_EVENT_STREAM_OPENED,
+                           renderer->diagnosticsEnabled ? elapsedRealtimeNs() : 0,
+                           renderer->sampleRate,
+                           renderer->channelCount,
+                           renderer->framesPerBurst,
+                           renderer->bufferSizeFrames,
+                           renderer->bufferCapacityFrames,
+                           renderer->performanceMode,
+                           renderer->sharingMode);
+
+    if (renderer->adaptive) {
+        LOGI("AAudio opened: %d Hz, %d channels, target=20-80 ms adaptive, initial=40 ms, steady capacity=%u frames, startup capacity=%u frames, burst=%d, mode=%d",
+             renderer->sampleRate, renderer->channelCount,
+             renderer->steadyCapacityFrames, renderer->capacityFrames,
+             renderer->framesPerBurst, renderer->performanceMode);
+    }
+    else {
+        LOGI("AAudio opened: %d Hz, %d channels, target=%u ms fixed, initial=%u ms, steady capacity=%u frames, startup capacity=%u frames, burst=%d, mode=%d",
+             renderer->sampleRate, renderer->channelCount,
+             renderer->fixedTargetMs, renderer->fixedTargetMs,
+             renderer->steadyCapacityFrames, renderer->capacityFrames,
+             renderer->framesPerBurst, renderer->performanceMode);
+    }
+    return AAUDIO_OK;
+}
+
+static void resetAfterDisconnect(AAudioRenderer* renderer) {
+    // Audio queued for the old route is stale. Start the replacement stream from packets
+    // delivered after recovery and require the normal startup target before becoming audible.
+    uint32_t writeFrame = atomic_load_explicit(&renderer->writeFrame, memory_order_acquire);
+    atomic_store_explicit(&renderer->readFrame, writeFrame, memory_order_release);
+    atomic_store_explicit(&renderer->started, false, memory_order_release);
+    atomic_store_explicit(&renderer->primed, false, memory_order_release);
+    atomic_store_explicit(&renderer->firstCallbackTimeNs, 0, memory_order_release);
+    atomic_store_explicit(&renderer->startRequestTimeNs, 0, memory_order_release);
+    atomic_store_explicit(&renderer->playbackRatePpm, RATE_ONE_PPM, memory_order_relaxed);
+    renderer->lastCallbackTimeNs = 0;
+}
+
+static void sleepBeforeRecoveryRetry(uint32_t attempt) {
+    uint32_t delayMs = 100U << (attempt < 4 ? attempt : 3);
+    struct timespec delay = {
+            .tv_sec = delayMs / 1000,
+            .tv_nsec = (long)(delayMs % 1000) * 1000000L,
+    };
+    while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {
+    }
+}
+
+static void* recoveryThreadMain(void* opaque) {
+    AAudioRenderer* renderer = (AAudioRenderer*)opaque;
+    for (;;) {
+        int waitResult;
+        do {
+            waitResult = sem_wait(&renderer->recoverySemaphore);
+        } while (waitResult != 0 && errno == EINTR);
+
+        if (atomic_load_explicit(&renderer->closing, memory_order_acquire)) {
+            break;
+        }
+        if (!atomic_exchange_explicit(&renderer->recoveryRequested, false,
+                                      memory_order_acq_rel)) {
+            continue;
+        }
+
+        atomic_store_explicit(&renderer->recovering, true, memory_order_release);
+        uint32_t attempt = 0;
+        while (!atomic_load_explicit(&renderer->closing, memory_order_acquire)) {
+            pthread_mutex_lock(&renderer->streamMutex);
+            closeStreamLocked(renderer);
+            resetAfterDisconnect(renderer);
+            aaudio_result_t result = openStreamLocked(renderer);
+            pthread_mutex_unlock(&renderer->streamMutex);
+
+            if (result == AAUDIO_OK) {
+                atomic_store_explicit(&renderer->lastError, AAUDIO_OK,
+                                      memory_order_release);
+                atomic_store_explicit(&renderer->recovering, false, memory_order_release);
+                LOGI("AAudio stream recovered after %u attempt(s)", attempt + 1);
+                maybeStart(renderer);
+                break;
+            }
+
+            attempt++;
+            atomic_store_explicit(&renderer->lastError, result, memory_order_release);
+            atomic_store_explicit(&renderer->streamState, AAUDIO_STREAM_STATE_DISCONNECTED,
+                                  memory_order_release);
+            LOGW("AAudio recovery attempt %u failed: %d (%s)",
+                 attempt, result, resultText(result));
+            sleepBeforeRecoveryRetry(attempt - 1);
+        }
+        atomic_store_explicit(&renderer->recovering, false, memory_order_release);
+    }
+    return NULL;
 }
 
 static double normalizedCorrelation(const AAudioRenderer* renderer, const int16_t* input,
@@ -991,19 +1221,24 @@ static void destroyRenderer(AAudioRenderer* renderer) {
     atomic_store_explicit(&renderer->closing, true, memory_order_release);
     atomic_store_explicit(&renderer->armed, false, memory_order_release);
 
-    if (renderer->stream != NULL) {
-        if (atomic_load_explicit(&renderer->started, memory_order_acquire)) {
-            aaudio_result_t stopResult = gApi.streamRequestStop(renderer->stream);
-            if (stopResult != AAUDIO_OK) {
-                LOGW("AAudio stop failed: %d (%s)", stopResult, resultText(stopResult));
-            }
-        }
+    if (renderer->recoveryThreadStarted) {
+        sem_post(&renderer->recoverySemaphore);
+        pthread_join(renderer->recoveryThread, NULL);
+        renderer->recoveryThreadStarted = false;
+    }
 
-        aaudio_result_t closeResult = gApi.streamClose(renderer->stream);
-        if (closeResult != AAUDIO_OK) {
-            LOGW("AAudio close failed: %d (%s)", closeResult, resultText(closeResult));
-        }
-        renderer->stream = NULL;
+    if (renderer->streamMutexInitialized) {
+        pthread_mutex_lock(&renderer->streamMutex);
+        closeStreamLocked(renderer);
+        pthread_mutex_unlock(&renderer->streamMutex);
+    }
+    if (renderer->recoverySemaphoreInitialized) {
+        sem_destroy(&renderer->recoverySemaphore);
+        renderer->recoverySemaphoreInitialized = false;
+    }
+    if (renderer->streamMutexInitialized) {
+        pthread_mutex_destroy(&renderer->streamMutex);
+        renderer->streamMutexInitialized = false;
     }
 
     free(renderer->ring);
@@ -1016,7 +1251,8 @@ static void destroyRenderer(AAudioRenderer* renderer) {
 JNIEXPORT jlong JNICALL
 Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
         JNIEnv* env, jclass clazz, jint sampleRate, jint channelCount,
-        jint samplesPerFrame, jboolean adaptive, jboolean diagnosticsEnabled) {
+        jint samplesPerFrame, jint fixedTargetMs, jboolean adaptive,
+        jboolean diagnosticsEnabled) {
     (void)env;
     (void)clazz;
 
@@ -1035,11 +1271,19 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
     renderer->channelCount = channelCount;
     renderer->adaptive = adaptive == JNI_TRUE;
     renderer->diagnosticsEnabled = diagnosticsEnabled == JNI_TRUE;
+    if (fixedTargetMs < MIN_FIXED_TARGET_MS) {
+        fixedTargetMs = MIN_FIXED_TARGET_MS;
+    }
+    else if (fixedTargetMs > MAX_FIXED_TARGET_MS) {
+        fixedTargetMs = MAX_FIXED_TARGET_MS;
+    }
+    renderer->fixedTargetMs = (uint32_t)fixedTargetMs;
     renderer->minTargetFrames = framesForMs(renderer,
-            renderer->adaptive ? MIN_TARGET_MS : FIXED_TARGET_MS);
+            renderer->adaptive ? MIN_TARGET_MS : (uint32_t)fixedTargetMs);
     renderer->maxTargetFrames = framesForMs(renderer,
-            renderer->adaptive ? MAX_TARGET_MS : FIXED_TARGET_MS);
-    uint32_t initialTargetFrames = framesForMs(renderer, INITIAL_TARGET_MS);
+            renderer->adaptive ? MAX_TARGET_MS : (uint32_t)fixedTargetMs);
+    uint32_t initialTargetFrames = framesForMs(renderer,
+            renderer->adaptive ? INITIAL_TARGET_MS : (uint32_t)fixedTargetMs);
     renderer->lastArrivalNs = -1;
     renderer->lastTargetDecreaseNs = -1;
     renderer->protectionUntilNs = -1;
@@ -1077,6 +1321,8 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
     atomic_init(&renderer->started, false);
     atomic_init(&renderer->primed, false);
     atomic_init(&renderer->closing, false);
+    atomic_init(&renderer->recoveryRequested, false);
+    atomic_init(&renderer->recovering, false);
     atomic_init(&renderer->underrunCallbacks, 0);
     atomic_init(&renderer->underrunFrames, 0);
     atomic_init(&renderer->droppedFrames, 0);
@@ -1098,80 +1344,35 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
         atomic_init(&renderer->diagnosticEvents[i].publishedSequence, 0);
     }
 
-    AAudioStreamBuilder* builder = NULL;
-    aaudio_result_t result = gApi.createStreamBuilder(&builder);
-    if (result != AAUDIO_OK || builder == NULL) {
-        LOGE("AAudio builder creation failed: %d (%s)", result, resultText(result));
+    if (pthread_mutex_init(&renderer->streamMutex, NULL) != 0) {
+        free(renderer->ring);
+        free(renderer->stretchBuffer);
+        free(renderer);
+        return 0;
+    }
+    renderer->streamMutexInitialized = true;
+    if (sem_init(&renderer->recoverySemaphore, 0, 0) != 0) {
+        destroyRenderer(renderer);
+        return 0;
+    }
+    renderer->recoverySemaphoreInitialized = true;
+
+    pthread_mutex_lock(&renderer->streamMutex);
+    aaudio_result_t result = openStreamLocked(renderer);
+    pthread_mutex_unlock(&renderer->streamMutex);
+    if (result != AAUDIO_OK) {
         destroyRenderer(renderer);
         return 0;
     }
 
-    gApi.builderSetDirection(builder, AAUDIO_DIRECTION_OUTPUT);
-    gApi.builderSetSharingMode(builder, AAUDIO_SHARING_MODE_SHARED);
-    gApi.builderSetPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
-    gApi.builderSetFormat(builder, AAUDIO_FORMAT_PCM_I16);
-    gApi.builderSetSampleRate(builder, sampleRate);
-    gApi.builderSetChannelCount(builder, channelCount);
-    if (gApi.builderSetUsage != NULL) {
-        gApi.builderSetUsage(builder, AAUDIO_USAGE_GAME);
-    }
-    if (gApi.builderSetContentType != NULL) {
-        gApi.builderSetContentType(builder, AAUDIO_CONTENT_TYPE_MUSIC);
-    }
-    gApi.builderSetDataCallback(builder, dataCallback, renderer);
-    gApi.builderSetErrorCallback(builder, errorCallback, renderer);
-
-    result = gApi.builderOpenStream(builder, &renderer->stream);
-    gApi.builderDelete(builder);
-    if (result != AAUDIO_OK || renderer->stream == NULL) {
-        LOGE("AAudio stream open failed: %d (%s)", result, resultText(result));
+    int threadResult = pthread_create(&renderer->recoveryThread, NULL,
+                                      recoveryThreadMain, renderer);
+    if (threadResult != 0) {
+        LOGE("Unable to start AAudio recovery thread: %d", threadResult);
         destroyRenderer(renderer);
         return 0;
     }
-    atomic_store_explicit(&renderer->streamState, gApi.streamGetState(renderer->stream),
-                          memory_order_release);
-
-    int32_t actualSampleRate = gApi.streamGetSampleRate(renderer->stream);
-    int32_t actualChannelCount = gApi.streamGetChannelCount(renderer->stream);
-    aaudio_format_t actualFormat = gApi.streamGetFormat(renderer->stream);
-    if (actualSampleRate != sampleRate || actualChannelCount != channelCount ||
-        actualFormat != AAUDIO_FORMAT_PCM_I16) {
-        LOGW("AAudio format mismatch: requested %d Hz/%d ch/I16, got %d Hz/%d ch/%d",
-             sampleRate, channelCount, actualSampleRate, actualChannelCount, actualFormat);
-        destroyRenderer(renderer);
-        return 0;
-    }
-
-    renderer->framesPerBurst = gApi.streamGetFramesPerBurst(renderer->stream);
-    if (renderer->framesPerBurst > 0) {
-        aaudio_result_t bufferResult =
-                gApi.streamSetBufferSizeInFrames(renderer->stream,
-                                                 renderer->framesPerBurst * 2);
-        if (bufferResult < 0) {
-            LOGW("Unable to set two-burst AAudio buffer: %d (%s)",
-                 bufferResult, resultText(bufferResult));
-        }
-    }
-    renderer->bufferSizeFrames = gApi.streamGetBufferSizeInFrames(renderer->stream);
-    renderer->bufferCapacityFrames = gApi.streamGetBufferCapacityInFrames(renderer->stream);
-    renderer->performanceMode = gApi.streamGetPerformanceMode(renderer->stream);
-    renderer->sharingMode = gApi.streamGetSharingMode(renderer->stream);
-
-    enqueueDiagnosticEvent(renderer,
-                           DIAGNOSTIC_EVENT_STREAM_OPENED,
-                           renderer->diagnosticsEnabled ? elapsedRealtimeNs() : 0,
-                           sampleRate,
-                           channelCount,
-                           renderer->framesPerBurst,
-                           renderer->bufferSizeFrames,
-                           renderer->bufferCapacityFrames,
-                           renderer->performanceMode,
-                           renderer->sharingMode);
-
-    LOGI("AAudio opened: %d Hz, %d channels, target=%s, initial=40 ms, steady capacity=%u frames, startup capacity=%u frames, burst=%d, mode=%d",
-         sampleRate, channelCount, renderer->adaptive ? "20-80 ms adaptive" : "40 ms fixed",
-         renderer->steadyCapacityFrames, renderer->capacityFrames, renderer->framesPerBurst,
-         renderer->performanceMode);
+    renderer->recoveryThreadStarted = true;
     pthread_mutex_lock(&gDirectRendererMutex);
     gDirectRenderer = renderer;
     pthread_mutex_unlock(&gDirectRendererMutex);
@@ -1247,14 +1448,23 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeGetStats(
 
     uint32_t readFrame = atomic_load_explicit(&renderer->readFrame, memory_order_acquire);
     uint32_t writeFrame = atomic_load_explicit(&renderer->writeFrame, memory_order_acquire);
-    aaudio_stream_state_t streamState = gApi.streamGetState(renderer->stream);
-    atomic_store_explicit(&renderer->streamState, streamState, memory_order_release);
+    aaudio_stream_state_t streamState = (aaudio_stream_state_t)atomic_load_explicit(
+            &renderer->streamState, memory_order_acquire);
+    int32_t xRunCount = 0;
+    if (pthread_mutex_trylock(&renderer->streamMutex) == 0) {
+        if (renderer->stream != NULL) {
+            streamState = gApi.streamGetState(renderer->stream);
+            xRunCount = gApi.streamGetXRunCount(renderer->stream);
+            atomic_store_explicit(&renderer->streamState, streamState, memory_order_release);
+        }
+        pthread_mutex_unlock(&renderer->streamMutex);
+    }
     jlong values[NATIVE_STATS_COUNT] = {
             (jlong)(writeFrame - readFrame),
             (jlong)atomic_load_explicit(&renderer->underrunCallbacks, memory_order_relaxed),
             (jlong)atomic_load_explicit(&renderer->underrunFrames, memory_order_relaxed),
             (jlong)atomic_load_explicit(&renderer->droppedFrames, memory_order_relaxed),
-            (jlong)gApi.streamGetXRunCount(renderer->stream),
+            (jlong)xRunCount,
             (jlong)atomic_load_explicit(&renderer->lastError, memory_order_acquire),
             (jlong)atomic_load_explicit(&renderer->targetFrames, memory_order_acquire),
             (jlong)atomic_load_explicit(&renderer->playbackRatePpm, memory_order_relaxed),
