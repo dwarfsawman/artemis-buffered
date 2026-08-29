@@ -17,6 +17,7 @@ import org.robolectric.annotation.Config;
 
 import java.io.File;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -124,6 +125,7 @@ public class SettingsPresetControllerTest {
                 .putString(RESOLUTION_KEY, "3840x2160")
                 .putString(FPS_KEY, "60")
                 .putInt(BITRATE_KEY, 80000)
+                .putInt(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 120)
                 .commit();
         SettingsProfile second = controller.addPreset("Second");
 
@@ -132,6 +134,8 @@ public class SettingsPresetControllerTest {
                 RESOLUTION_KEY, null));
         assertEquals("120", settings.getString(FPS_KEY, null));
         assertEquals(40000, settings.getInt(BITRATE_KEY, 0));
+        assertEquals(80, settings.getInt(
+                PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 0));
 
         controller.renamePreset(second, "4K TV");
         assertEquals("4K TV", second.getName());
@@ -178,6 +182,59 @@ public class SettingsPresetControllerTest {
         controller.resetPreset(reloaded);
         assertFalse(settings.contains(UNSET_KEY));
         assertFalse(controller.isDirty(reloaded));
+    }
+
+    @Test
+    public void defaultFixedBufferIsAlwaysStoredInNewPreset() {
+        settings.edit()
+                .remove(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)
+                .commit();
+
+        SettingsProfile preset = controller.addPreset("Default buffer");
+
+        assertEquals(PreferenceConfiguration.DEFAULT_FIXED_AUDIO_BUFFER_MS,
+                ((Number) preset.getOptions().get(
+                        PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)).intValue());
+        assertFalse(controller.isDirty(preset));
+    }
+
+    @Test
+    public void legacyPresetGetsFixedBufferAndCanResetSliderValue() {
+        HashMap<String, Object> legacyOptions = new HashMap<>();
+        legacyOptions.put(RESOLUTION_KEY, "1920x1080");
+        SettingsProfile legacy = new SettingsProfile(
+                java.util.UUID.randomUUID(),
+                "Legacy",
+                System.currentTimeMillis(),
+                System.currentTimeMillis(),
+                legacyOptions);
+        ProfilesManager manager = ProfilesManager.getInstance();
+        manager.add(legacy);
+        manager.setActive(legacy.getUuid());
+        settings.edit()
+                .putInt(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 120)
+                .commit();
+
+        controller = new SettingsPresetController(context, settings, new HashSet<>(Arrays.asList(
+                RESOLUTION_KEY,
+                PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)));
+
+        assertEquals(PreferenceConfiguration.DEFAULT_FIXED_AUDIO_BUFFER_MS,
+                ((Number) legacy.getOptions().get(
+                        PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)).intValue());
+        assertTrue(controller.isDirty(legacy));
+
+        controller.resetPreset(legacy);
+        assertEquals(PreferenceConfiguration.DEFAULT_FIXED_AUDIO_BUFFER_MS,
+                settings.getInt(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, -1));
+        assertFalse(controller.isDirty(legacy));
+
+        ProfilesManager.instance = null;
+        ProfilesManager reloadedManager = ProfilesManager.getInstance();
+        assertTrue(reloadedManager.load(context));
+        assertEquals(PreferenceConfiguration.DEFAULT_FIXED_AUDIO_BUFFER_MS,
+                ((Number) reloadedManager.getProfiles().get(0).getOptions().get(
+                        PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)).intValue());
     }
 
     private static void deleteRecursively(File file) {

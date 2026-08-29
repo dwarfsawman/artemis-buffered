@@ -61,7 +61,7 @@
         android:layout_marginTop="10dp"
         android:gravity="end"
         android:orientation="horizontal"
-        android:visibility="gone">
+        android:visibility="invisible">
 
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/settingsPresetSave"

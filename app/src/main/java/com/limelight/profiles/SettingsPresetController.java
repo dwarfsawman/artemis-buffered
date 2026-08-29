@@ -6,6 +6,8 @@ import android.content.SharedPreferences;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.limelight.preferences.PreferenceConfiguration;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -32,6 +34,7 @@ public final class SettingsPresetController {
         this.settings = settings;
         this.managedKeys = new HashSet<>(managedKeys);
         this.profilesManager = ProfilesManager.getInstance();
+        migrateFixedAudioBufferValues();
     }
 
     @NonNull
@@ -107,7 +110,7 @@ public final class SettingsPresetController {
         Set<String> unsetKeys = getUnsetKeys(presetValues);
         for (String key : managedKeys) {
             if (presetValues.containsKey(key) && !valuesEqual(
-                    currentValues.get(key), presetValues.get(key))) {
+                    getEffectiveCurrentValue(currentValues, key), presetValues.get(key))) {
                 return true;
             }
             if (unsetKeys.contains(key) && currentValues.containsKey(key)) {
@@ -122,7 +125,7 @@ public final class SettingsPresetController {
         Map<String, ?> currentValues = settings.getAll();
         if (isActive(profile)) {
             // Show pending edits on the selected card before they are saved.
-            return currentValues.get(key);
+            return getEffectiveCurrentValue(currentValues, key);
         }
 
         Map<String, Object> presetValues = profile.getOptions();
@@ -132,7 +135,7 @@ public final class SettingsPresetController {
         if (presetValues != null && getUnsetKeys(presetValues).contains(key)) {
             return null;
         }
-        return currentValues.get(key);
+        return getEffectiveCurrentValue(currentValues, key);
     }
 
     private Map<String, Object> captureCurrentSettings() {
@@ -140,7 +143,12 @@ public final class SettingsPresetController {
         Map<String, Object> snapshot = new HashMap<>();
         List<String> unsetKeys = new ArrayList<>();
         for (String key : managedKeys) {
-            if (currentValues.containsKey(key)) {
+            if (PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING.equals(key)) {
+                // Store the effective default even before the slider has written a value.
+                // This keeps every preset self-contained for fixed-buffer playback.
+                snapshot.put(key, PreferenceConfiguration.getFixedAudioBufferMs(settings));
+            }
+            else if (currentValues.containsKey(key)) {
                 snapshot.put(key, copyValue(currentValues.get(key)));
             }
             else {
@@ -150,6 +158,44 @@ public final class SettingsPresetController {
         snapshot.put(ProfilesManager.SNAPSHOT_VERSION_KEY, 1);
         snapshot.put(ProfilesManager.UNSET_KEYS_KEY, unsetKeys);
         return snapshot;
+    }
+
+    private void migrateFixedAudioBufferValues() {
+        if (!managedKeys.contains(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)) {
+            return;
+        }
+
+        for (SettingsProfile profile : profilesManager.getProfiles()) {
+            Map<String, Object> existing = profile.getOptions();
+            if (existing != null && existing.containsKey(
+                    PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)) {
+                continue;
+            }
+
+            Map<String, Object> migrated = existing == null ?
+                    new HashMap<>() : new HashMap<>(existing);
+            migrated.put(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING,
+                    PreferenceConfiguration.DEFAULT_FIXED_AUDIO_BUFFER_MS);
+            removeUnsetKey(migrated,
+                    PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING);
+            profile.setOptions(migrated);
+            profilesManager.update(profile);
+        }
+    }
+
+    private static void removeUnsetKey(Map<String, Object> values, String keyToRemove) {
+        Object value = values.get(ProfilesManager.UNSET_KEYS_KEY);
+        if (!(value instanceof Iterable)) {
+            return;
+        }
+
+        List<String> remaining = new ArrayList<>();
+        for (Object key : (Iterable<?>) value) {
+            if (key != null && !keyToRemove.equals(key.toString())) {
+                remaining.add(key.toString());
+            }
+        }
+        values.put(ProfilesManager.UNSET_KEYS_KEY, remaining);
     }
 
     private void applyPreset(@NonNull SettingsProfile profile) {
@@ -251,6 +297,20 @@ public final class SettingsPresetController {
             return new HashSet<>((List<?>) first).equals(second);
         }
         return Objects.equals(first, second);
+    }
+
+    private static Object getEffectiveCurrentValue(Map<String, ?> currentValues, String key) {
+        Object value = currentValues.get(key);
+        if (!PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING.equals(key)) {
+            return value;
+        }
+        if (!(value instanceof Number)) {
+            return PreferenceConfiguration.DEFAULT_FIXED_AUDIO_BUFFER_MS;
+        }
+
+        int milliseconds = ((Number) value).intValue();
+        return Math.max(PreferenceConfiguration.MIN_FIXED_AUDIO_BUFFER_MS,
+                Math.min(PreferenceConfiguration.MAX_FIXED_AUDIO_BUFFER_MS, milliseconds));
     }
 
     private static Object copyValue(Object value) {

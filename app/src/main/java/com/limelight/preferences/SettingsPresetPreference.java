@@ -146,10 +146,12 @@ public final class SettingsPresetPreference extends Preference
         if (adapter != null && recyclerView != null) {
             if (!refreshPosted) {
                 refreshPosted = true;
-                recyclerView.post(() -> {
+                RecyclerView boundRecyclerView = recyclerView;
+                boundRecyclerView.post(() -> {
                     refreshPosted = false;
                     if (adapter != null) {
                         adapter.refresh();
+                        boundRecyclerView.requestLayout();
                     }
                 });
             }
@@ -273,7 +275,9 @@ public final class SettingsPresetPreference extends Preference
                 fps.setText(getContext().getString(R.string.settings_preset_fps, fpsValue));
                 bitrate.setText(getContext().getString(
                         R.string.settings_preset_bitrate, bitrateMbps));
-                actions.setVisibility(selected && dirty ? View.VISIBLE : View.GONE);
+                // Reserve the action row's height so RecyclerView's horizontal layout cannot
+                // clip buttons that become visible after a setting changes.
+                actions.setVisibility(selected && dirty ? View.VISIBLE : View.INVISIBLE);
 
                 applyCardBackground(card, selected);
                 card.setActivated(selected);

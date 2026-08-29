@@ -1033,7 +1033,7 @@ public class PreferenceConfiguration {
                 DEFAULT_ENABLE_ADAPTIVE_AUDIO_BUFFER);
     }
 
-    static int getFixedAudioBufferMs(SharedPreferences prefs) {
+    public static int getFixedAudioBufferMs(SharedPreferences prefs) {
         int value = prefs.getInt(FIXED_AUDIO_BUFFER_MS_PREF_STRING,
                 DEFAULT_FIXED_AUDIO_BUFFER_MS);
         return Math.max(MIN_FIXED_AUDIO_BUFFER_MS,

@@ -446,7 +446,8 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
                 else {
                     Set<String> presetKeys = new HashSet<>();
                     collectPresetKeys(screen, presetKeys);
-                    presetPreference.configure(getPrefs(), presetKeys, this::reloadSettings);
+                    presetPreference.configure(getPrefs(), presetKeys,
+                            this::reloadSettingsAfterPresetApply);
                 }
             }
 
@@ -1168,6 +1169,17 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
                     }
                 }
             }, 500);
+        }
+
+        private void reloadSettingsAfterPresetApply() {
+            // Applying a preset writes directly to SharedPreferences, so unlike a preference
+            // change listener, there is no pending framework write to wait for. Recreate the
+            // screen immediately so inline controls such as the audio buffer slider reflect
+            // the selected preset on the next UI frame.
+            StreamSettings settingsActivity = (StreamSettings) getActivity();
+            if (settingsActivity != null) {
+                settingsActivity.reloadSettings();
+            }
         }
 
         int READ_REQUEST_CODE = 1001;

@@ -14,6 +14,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import androidx.test.core.app.ApplicationProvider;
 
 import com.limelight.R;
+import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.preferences.SettingsPresetPreference;
 
 import org.junit.After;
@@ -33,6 +34,7 @@ import java.util.HashMap;
 import java.util.UUID;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -110,6 +112,78 @@ public class SettingsPresetPreferenceUiTest {
         assertTrue(profilesManager.getProfiles().isEmpty());
         assertNull(profilesManager.getActive());
         assertEquals(1, carousel.getAdapter().getItemCount());
+
+        preference.onDetached();
+    }
+
+    @Test
+    public void dirtySelectedPresetShowsActionsAndSaveOverwritesBufferValue() throws Exception {
+        settings.edit()
+                .putInt(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 80)
+                .commit();
+        HashMap<String, Object> options = new HashMap<>();
+        options.put(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 80);
+        SettingsProfile profile = new SettingsProfile(
+                UUID.randomUUID(),
+                "Audio",
+                System.currentTimeMillis(),
+                System.currentTimeMillis(),
+                options);
+        profilesManager.add(profile);
+        profilesManager.setActive(profile.getUuid());
+
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        SettingsPresetPreference preference = new SettingsPresetPreference(activity);
+        preference.configure(settings, Collections.singleton(
+                PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING), () -> { });
+
+        View preferenceView = LayoutInflater.from(activity).inflate(
+                R.layout.preference_settings_preset_carousel, null, false);
+        activity.setContentView(preferenceView);
+        Constructor<PreferenceViewHolder> constructor =
+                PreferenceViewHolder.class.getDeclaredConstructor(View.class);
+        constructor.setAccessible(true);
+        preference.onBindViewHolder(constructor.newInstance(preferenceView));
+
+        RecyclerView carousel = preferenceView.findViewById(R.id.settingsPresetCarousel);
+        carousel.measure(
+                View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(500, View.MeasureSpec.EXACTLY));
+        carousel.layout(0, 0, 1000, 500);
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+
+        RecyclerView.ViewHolder holder = carousel.findViewHolderForAdapterPosition(0);
+        assertNotNull(holder);
+        View actions = holder.itemView.findViewById(R.id.settingsPresetActions);
+        View save = holder.itemView.findViewById(R.id.settingsPresetSave);
+        View reset = holder.itemView.findViewById(R.id.settingsPresetReset);
+        assertEquals(View.INVISIBLE, actions.getVisibility());
+
+        settings.edit()
+                .putInt(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 100)
+                .commit();
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        assertEquals(View.VISIBLE, actions.getVisibility());
+
+        assertTrue(save.performClick());
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        assertEquals(100, ((Number) profile.getOptions().get(
+                PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)).intValue());
+        assertEquals(View.INVISIBLE, actions.getVisibility());
+
+        settings.edit()
+                .putInt(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, 120)
+                .commit();
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        assertEquals(View.VISIBLE, actions.getVisibility());
+
+        assertTrue(reset.performClick());
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        assertEquals(100, settings.getInt(
+                PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING, -1));
+        assertFalse(new SettingsPresetController(activity, settings, Collections.singleton(
+                PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)).isDirty(profile));
+        assertEquals(View.INVISIBLE, actions.getVisibility());
 
         preference.onDetached();
     }
