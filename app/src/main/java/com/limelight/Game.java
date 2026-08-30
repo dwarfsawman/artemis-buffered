@@ -311,6 +311,21 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private static final int UTF8_CHUNK_SIZE = 512;
     private final Queue<String> commitTextQueue = new ArrayDeque<>();
     private final Handler commitTextHandler = new Handler(Looper.getMainLooper());
+    private final Handler streamInactivityHandler = new Handler(Looper.getMainLooper());
+    private final Runnable streamInactivityTimeout = new Runnable() {
+        @Override
+        public void run() {
+            if (prefConfig == null || !prefConfig.enableStreamInactivityTimeout ||
+                    (!connecting && !connected)) {
+                return;
+            }
+
+            LimeLog.info("Stream inactivity timeout reached; ending stream");
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            stopConnection();
+            finish();
+        }
+    };
 
     private final Runnable flushCommitTextQueue = new Runnable() {
         @Override
@@ -1912,6 +1927,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public boolean handleKeyDown(KeyEvent event) {
+        noteStreamUserInput();
+
         // Pass-through virtual navigation keys
         if ((event.getFlags() & KeyEvent.FLAG_VIRTUAL_HARD_KEY) != 0) {
             return false;
@@ -2638,6 +2655,11 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     // Returns true if the event was consumed
     // NB: View is only present if called from a view callback
     public boolean handleMotionEvent(View view, MotionEvent event) {
+        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            // External-display control touches bypass this Activity's dispatchTouchEvent().
+            noteStreamUserInput();
+        }
+
         // Pass through mouse/touch/joystick input if we're not grabbing
         if (!grabbedInput) {
             return false;
@@ -3201,7 +3223,19 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public boolean onGenericMotionEvent(MotionEvent event) {
+        if (event.getActionMasked() == MotionEvent.ACTION_BUTTON_PRESS ||
+                event.getActionMasked() == MotionEvent.ACTION_SCROLL) {
+            noteStreamUserInput();
+        }
         return handleMotionEvent(null, event) || super.onGenericMotionEvent(event);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            noteStreamUserInput();
+        }
+        return super.dispatchTouchEvent(event);
     }
 
     /**
@@ -3338,6 +3372,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     private void stopConnection() {
+        cancelStreamInactivityTimeout();
         if (connecting || connected) {
             connecting = connected = false;
             updatePipAutoEnter();
@@ -3602,6 +3637,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
                 // Keep the display on
                 getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                noteStreamUserInput();
 
                 // Update GameManager state to indicate we're in game
                 UiHelper.notifyStreamConnected(Game.this);
@@ -3632,6 +3668,20 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             // This may be null if launched from the "Resume Session" PC context menu item
             shortcutHelper.reportGameLaunched(computer, app);
         }
+    }
+
+    private void noteStreamUserInput() {
+        cancelStreamInactivityTimeout();
+        if (prefConfig == null || !prefConfig.enableStreamInactivityTimeout || !connected) {
+            return;
+        }
+
+        long timeoutMillis = prefConfig.streamInactivityTimeoutHours * 60L * 60L * 1000L;
+        streamInactivityHandler.postDelayed(streamInactivityTimeout, timeoutMillis);
+    }
+
+    private void cancelStreamInactivityTimeout() {
+        streamInactivityHandler.removeCallbacks(streamInactivityTimeout);
     }
 
     @Override

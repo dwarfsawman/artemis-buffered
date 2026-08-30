@@ -64,7 +64,9 @@ public class SettingsPresetControllerTest {
                 UNSET_KEY,
                 STRING_SET_KEY,
                 PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING,
-                PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING));
+                PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING,
+                PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING,
+                PreferenceConfiguration.STREAM_INACTIVITY_TIMEOUT_HOURS_PREF_STRING));
         controller = new SettingsPresetController(context, settings, managedKeys);
     }
 
@@ -196,6 +198,58 @@ public class SettingsPresetControllerTest {
                 ((Number) preset.getOptions().get(
                         PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)).intValue());
         assertFalse(controller.isDirty(preset));
+    }
+
+    @Test
+    public void defaultStreamInactivityTimeoutIsAlwaysStoredInNewPreset() {
+        settings.edit()
+                .remove(PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING)
+                .remove(PreferenceConfiguration.STREAM_INACTIVITY_TIMEOUT_HOURS_PREF_STRING)
+                .commit();
+
+        SettingsProfile preset = controller.addPreset("Default inactivity timeout");
+
+        assertEquals(PreferenceConfiguration.DEFAULT_ENABLE_STREAM_INACTIVITY_TIMEOUT,
+                preset.getOptions().get(
+                        PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING));
+        assertEquals(PreferenceConfiguration.DEFAULT_STREAM_INACTIVITY_TIMEOUT_HOURS,
+                ((Number) preset.getOptions().get(
+                        PreferenceConfiguration.STREAM_INACTIVITY_TIMEOUT_HOURS_PREF_STRING)).intValue());
+        assertFalse(controller.isDirty(preset));
+    }
+
+    @Test
+    public void legacyPresetGetsDefaultStreamInactivityTimeout() {
+        HashMap<String, Object> legacyOptions = new HashMap<>();
+        legacyOptions.put(RESOLUTION_KEY, "1920x1080");
+        SettingsProfile legacy = new SettingsProfile(
+                java.util.UUID.randomUUID(),
+                "Legacy timeout",
+                System.currentTimeMillis(),
+                System.currentTimeMillis(),
+                legacyOptions);
+        ProfilesManager manager = ProfilesManager.getInstance();
+        manager.add(legacy);
+
+        controller = new SettingsPresetController(context, settings, new HashSet<>(Arrays.asList(
+                RESOLUTION_KEY,
+                PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING,
+                PreferenceConfiguration.STREAM_INACTIVITY_TIMEOUT_HOURS_PREF_STRING)));
+
+        assertEquals(PreferenceConfiguration.DEFAULT_ENABLE_STREAM_INACTIVITY_TIMEOUT,
+                legacy.getOptions().get(
+                        PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING));
+        assertEquals(PreferenceConfiguration.DEFAULT_STREAM_INACTIVITY_TIMEOUT_HOURS,
+                ((Number) legacy.getOptions().get(
+                        PreferenceConfiguration.STREAM_INACTIVITY_TIMEOUT_HOURS_PREF_STRING)).intValue());
+
+        ProfilesManager.instance = null;
+        ProfilesManager reloadedManager = ProfilesManager.getInstance();
+        assertTrue(reloadedManager.load(context));
+        SettingsProfile reloaded = reloadedManager.getProfiles().get(0);
+        assertEquals(PreferenceConfiguration.DEFAULT_STREAM_INACTIVITY_TIMEOUT_HOURS,
+                ((Number) reloaded.getOptions().get(
+                        PreferenceConfiguration.STREAM_INACTIVITY_TIMEOUT_HOURS_PREF_STRING)).intValue());
     }
 
     @Test

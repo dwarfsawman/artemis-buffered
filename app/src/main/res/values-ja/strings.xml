@@ -188,6 +188,10 @@
     <string name="summary_checkbox_enable_audio_diagnostics">直近8回のストリーミングについて、音声バッファ、ジッター、アンダーラン、破棄、書き込みエラーを時刻付きで記録します。共有するまでログは端末内だけに保存されます。</string>
     <string name="category_artemis_buffered_settings">Artemis Buffered（固有設定）</string>
     <string name="summary_category_artemis_buffered_settings">オレンジ色の項目はこのビルド固有の設定です</string>
+    <string name="title_checkbox_enable_stream_inactivity_timeout">無操作時にストリーミングを終了</string>
+    <string name="summary_checkbox_enable_stream_inactivity_timeout">選択した時間、キー操作またはタッチ操作がなければストリーミングを終了し、画面を消灯できる状態にします。</string>
+    <string name="title_seekbar_stream_inactivity_timeout_hours">無操作タイムアウト（時間）</string>
+    <string name="summary_seekbar_stream_inactivity_timeout_hours">1～24時間を1時間刻みで選択します。キー操作またはタッチ操作のたびにタイマーをリセットします。</string>
     <string name="keyboard_service_label">Artemis Buffered Physical Keyboard</string>
     <string name="settings_preset_title">設定プリセット</string>
     <string name="settings_preset_summary">カードを選ぶとプリセットが切り替わります。設定変更後は選択中のカードから保存またはリセットできます。カードを長押しすると削除できます。</string>

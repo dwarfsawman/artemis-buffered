@@ -85,6 +85,10 @@ public class ArtemisSettingsAppearanceTest {
         assertEquals("com.limelight.preferences.ArtemisSwitchPreference",
                 customTags.get(PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING));
         assertEquals("com.limelight.preferences.ArtemisSwitchPreference",
+                customTags.get(PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING));
+        assertEquals("com.limelight.preferences.ArtemisSeekBarPreference",
+                customTags.get(PreferenceConfiguration.STREAM_INACTIVITY_TIMEOUT_HOURS_PREF_STRING));
+        assertEquals("com.limelight.preferences.ArtemisSwitchPreference",
                 customTags.get(PreferenceConfiguration.ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING));
         assertEquals("com.limelight.preferences.ArtemisSeekBarPreference",
                 customTags.get(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING));
@@ -146,6 +150,46 @@ public class ArtemisSettingsAppearanceTest {
         }
 
         throw new AssertionError("Fixed audio buffer slider was not found");
+    }
+
+    @Test
+    public void streamInactivityTimeoutUsesOneHourStepsAndDefaultsToThreeHours()
+            throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+        boolean toggleFound = false;
+        boolean sliderFound = false;
+
+        try (XmlResourceParser parser = context.getResources().getXml(R.xml.preferences)) {
+            int event;
+            while ((event = parser.next()) != XmlPullParser.END_DOCUMENT) {
+                if (event != XmlPullParser.START_TAG) {
+                    continue;
+                }
+
+                String key = parser.getAttributeValue(ANDROID_NS, "key");
+                if (PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING.equals(key)) {
+                    assertTrue(parser.getAttributeBooleanValue(
+                            ANDROID_NS, "defaultValue", false));
+                    toggleFound = true;
+                }
+                else if (PreferenceConfiguration.STREAM_INACTIVITY_TIMEOUT_HOURS_PREF_STRING.equals(key)) {
+                    assertEquals(PreferenceConfiguration.DEFAULT_STREAM_INACTIVITY_TIMEOUT_HOURS,
+                            parser.getAttributeIntValue(ANDROID_NS, "defaultValue", -1));
+                    assertEquals(PreferenceConfiguration.MIN_STREAM_INACTIVITY_TIMEOUT_HOURS,
+                            parser.getAttributeIntValue(APP_NS, "min", -1));
+                    assertEquals(PreferenceConfiguration.MAX_STREAM_INACTIVITY_TIMEOUT_HOURS,
+                            parser.getAttributeIntValue(ANDROID_NS, "max", -1));
+                    assertEquals(1,
+                            parser.getAttributeIntValue(APP_NS, "seekBarIncrement", -1));
+                    assertEquals(PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING,
+                            parser.getAttributeValue(ANDROID_NS, "dependency"));
+                    sliderFound = true;
+                }
+            }
+        }
+
+        assertTrue("Inactivity timeout toggle was not found", toggleFound);
+        assertTrue("Inactivity timeout slider was not found", sliderFound);
     }
 
     @Test

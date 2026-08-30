@@ -441,6 +441,10 @@
     <string name="summary_checkbox_enable_audio_diagnostics">Record timestamped audio buffer, jitter, underrun, drop, and write-error data for the 8 most recent streaming sessions. Logs stay on this device until shared.</string>
     <string name="category_artemis_buffered_settings">Artemis Buffered (custom settings)</string>
     <string name="summary_category_artemis_buffered_settings">Orange settings are specific to this build</string>
+    <string name="title_checkbox_enable_stream_inactivity_timeout">Stop streaming after inactivity</string>
+    <string name="summary_checkbox_enable_stream_inactivity_timeout">End the stream and allow the screen to turn off when there has been no key or touch input for the selected time.</string>
+    <string name="title_seekbar_stream_inactivity_timeout_hours">Inactivity timeout (hours)</string>
+    <string name="summary_seekbar_stream_inactivity_timeout_hours">Choose 1–24 hours in 1-hour steps. The timer restarts whenever a key is pressed or the screen is touched.</string>
     <string name="settings_preset_title">Settings presets</string>
     <string name="settings_preset_summary">Select a card to switch presets. Edit settings, then save or reset the selected card. Long-press a card to delete it.</string>
     <string name="settings_preset_default_name">Preset %1$d</string>

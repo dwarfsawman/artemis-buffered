@@ -18,6 +18,26 @@
             app:iconSpaceReserved="false" />
 
         <com.limelight.preferences.ArtemisSwitchPreference
+            android:defaultValue="true"
+            android:key="checkbox_enable_stream_inactivity_timeout"
+            android:summary="@string/summary_checkbox_enable_stream_inactivity_timeout"
+            android:title="@string/title_checkbox_enable_stream_inactivity_timeout"
+            app:iconSpaceReserved="false" />
+
+        <com.limelight.preferences.ArtemisSeekBarPreference
+            android:defaultValue="3"
+            android:dependency="checkbox_enable_stream_inactivity_timeout"
+            android:key="seekbar_stream_inactivity_timeout_hours"
+            android:max="24"
+            android:summary="@string/summary_seekbar_stream_inactivity_timeout_hours"
+            android:title="@string/title_seekbar_stream_inactivity_timeout_hours"
+            app:iconSpaceReserved="false"
+            app:min="1"
+            app:seekBarIncrement="1"
+            app:showSeekBarValue="true"
+            app:updatesContinuously="true" />
+
+        <com.limelight.preferences.ArtemisSwitchPreference
             android:defaultValue="false"
             android:key="checkbox_enable_callback_audio_buffer"
             android:summary="@string/summary_checkbox_enable_callback_audio_buffer"

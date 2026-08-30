@@ -34,7 +34,7 @@ public final class SettingsPresetController {
         this.settings = settings;
         this.managedKeys = new HashSet<>(managedKeys);
         this.profilesManager = ProfilesManager.getInstance();
-        migrateFixedAudioBufferValues();
+        migrateRequiredDefaultValues();
     }
 
     @NonNull
@@ -143,10 +143,10 @@ public final class SettingsPresetController {
         Map<String, Object> snapshot = new HashMap<>();
         List<String> unsetKeys = new ArrayList<>();
         for (String key : managedKeys) {
-            if (PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING.equals(key)) {
-                // Store the effective default even before the slider has written a value.
-                // This keeps every preset self-contained for fixed-buffer playback.
-                snapshot.put(key, PreferenceConfiguration.getFixedAudioBufferMs(settings));
+            if (isRequiredDefaultKey(key)) {
+                // Store effective defaults even before the controls have written values.
+                // This keeps every preset self-contained across app upgrades.
+                snapshot.put(key, getRequiredDefaultValue(key));
             }
             else if (currentValues.containsKey(key)) {
                 snapshot.put(key, copyValue(currentValues.get(key)));
@@ -160,27 +160,51 @@ public final class SettingsPresetController {
         return snapshot;
     }
 
-    private void migrateFixedAudioBufferValues() {
-        if (!managedKeys.contains(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)) {
-            return;
-        }
-
+    private void migrateRequiredDefaultValues() {
         for (SettingsProfile profile : profilesManager.getProfiles()) {
             Map<String, Object> existing = profile.getOptions();
-            if (existing != null && existing.containsKey(
-                    PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)) {
-                continue;
-            }
-
             Map<String, Object> migrated = existing == null ?
                     new HashMap<>() : new HashMap<>(existing);
-            migrated.put(PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING,
-                    PreferenceConfiguration.DEFAULT_FIXED_AUDIO_BUFFER_MS);
-            removeUnsetKey(migrated,
-                    PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING);
-            profile.setOptions(migrated);
-            profilesManager.update(profile);
+            boolean changed = false;
+            for (String key : managedKeys) {
+                if (isRequiredDefaultKey(key) && !migrated.containsKey(key)) {
+                    migrated.put(key, getMigrationDefaultValue(key));
+                    removeUnsetKey(migrated, key);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                profile.setOptions(migrated);
+                profilesManager.update(profile);
+            }
         }
+    }
+
+    private boolean isRequiredDefaultKey(String key) {
+        return PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING.equals(key) ||
+                PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING.equals(key) ||
+                PreferenceConfiguration.STREAM_INACTIVITY_TIMEOUT_HOURS_PREF_STRING.equals(key);
+    }
+
+    private Object getRequiredDefaultValue(String key) {
+        if (PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING.equals(key)) {
+            return PreferenceConfiguration.getFixedAudioBufferMs(settings);
+        }
+        if (PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING.equals(key)) {
+            return settings.getBoolean(key,
+                    PreferenceConfiguration.DEFAULT_ENABLE_STREAM_INACTIVITY_TIMEOUT);
+        }
+        return PreferenceConfiguration.getStreamInactivityTimeoutHours(settings);
+    }
+
+    private Object getMigrationDefaultValue(String key) {
+        if (PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING.equals(key)) {
+            return PreferenceConfiguration.DEFAULT_FIXED_AUDIO_BUFFER_MS;
+        }
+        if (PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING.equals(key)) {
+            return PreferenceConfiguration.DEFAULT_ENABLE_STREAM_INACTIVITY_TIMEOUT;
+        }
+        return PreferenceConfiguration.DEFAULT_STREAM_INACTIVITY_TIMEOUT_HOURS;
     }
 
     private static void removeUnsetKey(Map<String, Object> values, String keyToRemove) {
@@ -301,6 +325,18 @@ public final class SettingsPresetController {
 
     private static Object getEffectiveCurrentValue(Map<String, ?> currentValues, String key) {
         Object value = currentValues.get(key);
+        if (PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING.equals(key)) {
+            return value instanceof Boolean ? value :
+                    PreferenceConfiguration.DEFAULT_ENABLE_STREAM_INACTIVITY_TIMEOUT;
+        }
+        if (PreferenceConfiguration.STREAM_INACTIVITY_TIMEOUT_HOURS_PREF_STRING.equals(key)) {
+            if (!(value instanceof Number)) {
+                return PreferenceConfiguration.DEFAULT_STREAM_INACTIVITY_TIMEOUT_HOURS;
+            }
+            int hours = ((Number) value).intValue();
+            return Math.max(PreferenceConfiguration.MIN_STREAM_INACTIVITY_TIMEOUT_HOURS,
+                    Math.min(PreferenceConfiguration.MAX_STREAM_INACTIVITY_TIMEOUT_HOURS, hours));
+        }
         if (!PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING.equals(key)) {
             return value;
         }
