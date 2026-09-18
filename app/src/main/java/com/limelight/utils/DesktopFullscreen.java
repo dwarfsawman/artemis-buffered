@@ -73,6 +73,8 @@ public final class DesktopFullscreen {
         return false;
     }
 
+    private static final String TAG = "DesktopFullscreen";
+
     @SuppressWarnings("deprecation")
     public void apply(Activity activity) {
         if (activity == null || activity.getWindow() == null) {
@@ -92,11 +94,29 @@ public final class DesktopFullscreen {
             return;
         }
 
+        // Samsung One UI / DeX: Hide caption bar via samsungFlags 0x01000000
+        try {
+            WindowManager.LayoutParams attrs = activity.getWindow().getAttributes();
+            java.lang.reflect.Field samsungFlagsField = attrs.getClass().getField("samsungFlags");
+            int currentSamsungFlags = samsungFlagsField.getInt(attrs);
+            final int SAMSUNG_FLAG_HIDE_CAPTION = 0x01000000;
+            if (enabled) {
+                samsungFlagsField.setInt(attrs, currentSamsungFlags | SAMSUNG_FLAG_HIDE_CAPTION);
+            } else {
+                samsungFlagsField.setInt(attrs, currentSamsungFlags & ~SAMSUNG_FLAG_HIDE_CAPTION);
+            }
+            activity.getWindow().setAttributes(attrs);
+        } catch (Throwable t) {
+            android.util.Log.w(TAG, "Failed to apply samsungFlags", t);
+        }
+
         if (enabled) {
             if (!applied) {
                 previousVisibility = decor.getSystemUiVisibility();
             }
             applied = true;
+
+            ShizukuDesktopImmersive.checkAndTrigger(activity);
 
             activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
             activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN);

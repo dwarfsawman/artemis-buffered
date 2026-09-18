@@ -32,12 +32,12 @@ This experimental fork targets shared Wi-Fi environments such as internet cafés
 ## DeXで全画面起動
 
 設定の「Artemis Buffered」欄にある「DeXで全画面起動」で切り替えます（既定ON）。
-アプリアイコンからの次回起動時に、Samsung DeXへ全画面サイズを要求します。
-OFFはOSの通常のウィンドウサイズを使います。OSが前回の全画面状態を記憶している場合、OFFだけでは縮小されません。
+アプリアイコンからの起動時に、Samsung DeXへ全画面サイズを要求します。
+Shizukuが起動している環境では、DeX外部ディスプレイ起動時にキャプションバー装飾（`ReusableWindowDecorViewHost`）の座標を動的に特定し、全画面トグルボタン（`toggle_immersive_window`）を自動タップすることで、タイトルバー・DeXタスクバーの双方が完全に隠れた真の全画面（Immersive Fullscreen）を実現します。
+OFFはOSの通常のウィンドウサイズを使い、自動タップを行いません。
 ON/OFFはプリセットに保存でき、既存プリセットの未設定値はONで補完されます。
 Samsung以外の端末とAndroid 7.0未満では通常起動します。
-既存タスクの再表示やストリーミング用ショートカットは対象外です。
-Samsung公式のDeX全画面メタデータ（launchwidth/height=0、FreeformWindowSize=maximize）およびLaunchBounds/WindowingMode方式で全画面ウィンドウを要求し、Samsung端末のDeX／デスクトップ環境（外部ディスプレイやマルチウィンドウ・フリーフォーム環境）上でPC一覧・アプリ一覧・設定画面でシステムバー（タイトルバーを含む）の非表示も要求します。画面フォーカス復帰・画面構成変更時・再開時（onResume）に再適用します。
+画面フォーカス復帰・画面構成変更時・再開時（onResume）に再適用します。
 
 ## Upstream project
 

@@ -1,6 +1,7 @@
 package com.limelight;
 
 import android.app.Application;
+import android.os.Build;
 import android.widget.Toast;
 
 import com.limelight.profiles.ProfilesManager;
@@ -13,5 +14,6 @@ public class ArtemisApplication extends Application {
         if (!profilesManager.load(this)) {
             Toast.makeText(this, R.string.profile_manager_failed_to_load, Toast.LENGTH_LONG).show();
         }
+        com.limelight.utils.ShizukuDesktopImmersive.initShizukuListeners();
     }
 }

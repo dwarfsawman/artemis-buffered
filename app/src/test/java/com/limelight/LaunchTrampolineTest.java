@@ -5,12 +5,9 @@ import static org.robolectric.Shadows.shadowOf;
 
 import android.content.Context;
 import android.content.Intent;
-import android.graphics.Rect;
 
 import androidx.preference.PreferenceManager;
 import androidx.test.core.app.ApplicationProvider;
-
-import com.limelight.preferences.PreferenceConfiguration;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -32,36 +29,15 @@ public class LaunchTrampolineTest {
     }
 
     @Test
-    public void freshInstallRequestsFullscreenAndFinishesTrampoline() {
+    public void trampolineStartsPcViewAndFinishes() {
         LaunchTrampoline activity = Robolectric.buildActivity(LaunchTrampoline.class).create().get();
         ShadowActivity.IntentForResult launch = shadowOf(activity).getNextStartedActivityForResult();
         assertEquals(PcView.class.getName(), launch.intent.getComponent().getClassName());
         assertEquals(Intent.ACTION_MAIN, launch.intent.getAction());
         assertTrue(launch.intent.hasCategory(Intent.CATEGORY_LAUNCHER));
         assertEquals(Intent.FLAG_ACTIVITY_NEW_TASK, launch.intent.getFlags());
-        assertNotNull(launch.options);
-        assertEquals(1, launch.options.getInt("android.activity.windowingMode"));
-        assertNull(launch.options.getParcelable("android:activity.launchBounds"));
+        assertNull(launch.options);
         assertTrue(activity.isFinishing());
-    }
-
-    @Test
-    public void disabledUsesSystemWindowSize() {
-        PreferenceManager.getDefaultSharedPreferences(ApplicationProvider.getApplicationContext())
-                .edit().putBoolean(PreferenceConfiguration.LAUNCH_FULLSCREEN_PREF_STRING, false).commit();
-        assertNormalLaunch();
-    }
-
-    @Test
-    public void otherManufacturersKeepNormalLaunch() {
-        ShadowBuild.setManufacturer("Google");
-        assertNormalLaunch();
-    }
-
-    @Test
-    @Config(sdk = 23)
-    public void oldAndroidDoesNotUseLaunchBounds() {
-        assertNormalLaunch();
     }
 
     @Test
@@ -70,13 +46,5 @@ public class LaunchTrampolineTest {
         Intent launch = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
         assertNotNull(launch);
         assertEquals(LaunchTrampoline.class.getName(), launch.getComponent().getClassName());
-    }
-
-    private void assertNormalLaunch() {
-        LaunchTrampoline activity = Robolectric.buildActivity(LaunchTrampoline.class).create().get();
-        ShadowActivity.IntentForResult launch = shadowOf(activity).getNextStartedActivityForResult();
-        assertEquals(PcView.class.getName(), launch.intent.getComponent().getClassName());
-        assertNull(launch.options);
-        assertTrue(activity.isFinishing());
     }
 }

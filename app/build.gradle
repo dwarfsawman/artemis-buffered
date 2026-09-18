@@ -11,8 +11,8 @@ android {
         minSdk 21
         targetSdk 34
 
-        versionName "20.2.6-buffered.17"
-        versionCode = 5817
+        versionName "20.2.6-buffered.18"
+        versionCode = 5818
 
         // Generate native debug symbols to allow Google Play to symbolicate our native crashes
         ndk.debugSymbolLevel = 'FULL'
@@ -183,6 +183,9 @@ dependencies {
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
     implementation 'com.google.android.material:material:1.12.0'
     implementation 'com.github.ByteHamster:SearchPreference:v2.5.1'
+    def shizuku_version = '13.1.5'
+    implementation "dev.rikka.shizuku:api:${shizuku_version}"
+    implementation "dev.rikka.shizuku:provider:${shizuku_version}"
 
     // Unit test dependencies
     testImplementation 'junit:junit:4.13.2'
