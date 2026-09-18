@@ -18,3 +18,8 @@ Do **NOT** stop at local build/dist placement. You **MUST complete all steps thr
      --title "Artemis Buffered 20.2.6-buffered.<N>" `
      --notes-file dist/release-<N>-notes.md
    ```
+
+## Device Debugging (Galaxy S26)
+- Windows 側（`~/.android/adbkey`）に ADB 鍵が記憶されておりペアリング済み。再ペアリング（`adb pair`）は不要。
+- ワイヤレスデバッグ接続: `adb connect 192.168.1.102:<port>`（端末再起動やトグル OFF/ON でポート番号が変わった場合は、新しいポートに対して `adb connect` を実行するだけで接続可能）。
+
