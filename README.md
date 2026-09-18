@@ -37,7 +37,8 @@ OFFはOSの通常のウィンドウサイズを使います。OSが前回の全�
 ON/OFFはプリセットに保存でき、既存プリセットの未設定値はONで補完されます。
 Samsung以外の端末とAndroid 7.0未満では通常起動します。
 既存タスクの再表示やストリーミング用ショートカットは対象外です。
-Samsung公式の[LaunchBounds方式](https://developer.samsung.com/samsung-dex/modify-optional.html)を使用しています。DeX実機での動作は未検証です。
+Samsung公式の[LaunchBounds方式](https://developer.samsung.com/samsung-dex/modify-optional.html)でウィンドウサイズを要求し、Samsung端末の外部ディスプレイ上ではPC一覧・アプリ一覧・設定画面でシステムバー（タイトルバーを含む）の非表示も要求します。フォーカス復帰・画面構成変更時に再適用します。スマートフォン本体の画面は対象外です。
+DeX／One UIのバージョンによってはタイトルバーの非表示がOSに制限されます。修正版のDeX実機での動作は未検証です。
 
 ## Upstream project
 

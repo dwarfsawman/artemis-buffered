@@ -168,9 +168,21 @@ public class AppView extends AppCompatActivity implements AdapterFragmentCallbac
         }
     };
 
+    private final com.limelight.utils.DesktopFullscreen desktopFullscreen =
+            new com.limelight.utils.DesktopFullscreen();
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            desktopFullscreen.apply(this);
+        }
+    }
+
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        desktopFullscreen.apply(this);
 
         this.prefConfig = PreferenceConfiguration.readPreferences(this);
 

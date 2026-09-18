@@ -107,9 +107,21 @@ public class PcView extends AppCompatActivity implements AdapterFragmentCallback
         }
     };
 
+    private final com.limelight.utils.DesktopFullscreen desktopFullscreen =
+            new com.limelight.utils.DesktopFullscreen();
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            desktopFullscreen.apply(this);
+        }
+    }
+
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        desktopFullscreen.apply(this);
 
         // Only reinitialize views if completeOnCreate() was called
         // before this callback. If it was not, completeOnCreate() will
