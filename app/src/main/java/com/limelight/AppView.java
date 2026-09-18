@@ -403,6 +403,7 @@ public class AppView extends AppCompatActivity implements AdapterFragmentCallbac
     @Override
     protected void onResume() {
         super.onResume();
+        desktopFullscreen.apply(this);
 
         // Display a decoder crash notification if we've returned after a crash
         UiHelper.showDecoderCrashDialog(this);

@@ -40,7 +40,8 @@ public class LaunchTrampolineTest {
         assertTrue(launch.intent.hasCategory(Intent.CATEGORY_LAUNCHER));
         assertEquals(Intent.FLAG_ACTIVITY_NEW_TASK, launch.intent.getFlags());
         assertNotNull(launch.options);
-        assertEquals(new Rect(), launch.options.getParcelable("android:activity.launchBounds"));
+        assertEquals(1, launch.options.getInt("android.activity.windowingMode"));
+        assertNull(launch.options.getParcelable("android:activity.launchBounds"));
         assertTrue(activity.isFinishing());
     }
 

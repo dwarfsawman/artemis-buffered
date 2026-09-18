@@ -200,6 +200,12 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
             new com.limelight.utils.DesktopFullscreen();
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        desktopFullscreen.apply(this);
+    }
+
+    @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {

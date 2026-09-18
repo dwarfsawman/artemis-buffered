@@ -72,6 +72,19 @@
         <meta-data
             android:name="com.sec.android.support.multiwindow"
             android:value="true" />
+        <!-- Samsung DeX full-screen launch configuration -->
+        <meta-data
+            android:name="com.samsung.android.dex.launchwidth"
+            android:value="0" />
+        <meta-data
+            android:name="com.samsung.android.dex.launchheight"
+            android:value="0" />
+        <meta-data
+            android:name="com.samsung.android.sdk.multiwindow.dex.launchwidth"
+            android:value="0" />
+        <meta-data
+            android:name="com.samsung.android.sdk.multiwindow.dex.launchheight"
+            android:value="0" />
 
         <!-- Disable Game Mode downscaling since it can break our UI dialogs and doesn't benefit
              performance much for us since we don't use GL/Vulkan for rendering anyway -->
@@ -94,7 +107,7 @@
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection">
 
-            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
+            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="maximize" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
 
         </activity>
@@ -104,6 +117,8 @@
             android:noHistory="true"
             android:resizeableActivity="true"
             android:theme="@android:style/Theme.NoDisplay">
+            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="maximize" />
+            <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
@@ -121,7 +136,7 @@
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection">
-            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
+            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="maximize" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -139,7 +154,7 @@
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection">
-            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
+            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="maximize" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
         </activity>
         <activity
@@ -148,7 +163,7 @@
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection"
             android:theme="@style/SettingsTheme">
-            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
+            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="maximize" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
         </activity>
         <activity
@@ -158,7 +173,7 @@
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection"
             android:label="@string/title_edit_profile"
             android:theme="@style/SettingsTheme">
-            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
+            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="maximize" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
         </activity>
         <activity android:name=".utils.ExternalDisplayControlActivity"
@@ -176,7 +191,7 @@
             android:label="Streaming Settings"
             android:theme="@style/SettingsTheme"
             >
-            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
+            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="maximize" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
         </activity>
         <activity
@@ -187,7 +202,7 @@
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection"
             android:label="Add Computer Manually">
-            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
+            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="maximize" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
 
             <intent-filter>
@@ -209,7 +224,7 @@
             android:theme="@style/StreamTheme"
             android:preferMinimalPostProcessing="true">
 
-            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
+            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="maximize" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
 
             <!-- Special metadata for NVIDIA Shield devices to prevent input buffering
@@ -237,7 +252,7 @@
             android:resizeableActivity="true"
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection">
-            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
+            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="maximize" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
         </activity>
 
