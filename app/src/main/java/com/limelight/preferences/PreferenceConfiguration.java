@@ -75,6 +75,8 @@ public class PreferenceConfiguration {
     public static final String ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING = "checkbox_enable_callback_audio_buffer";
     public static final String ENABLE_ADAPTIVE_AUDIO_BUFFER_PREF_STRING = "checkbox_enable_adaptive_audio_buffer";
     public static final String FIXED_AUDIO_BUFFER_MS_PREF_STRING = "seekbar_fixed_audio_buffer_ms";
+    public static final String LAUNCH_FULLSCREEN_PREF_STRING = "checkbox_launch_fullscreen";
+    public static final boolean DEFAULT_LAUNCH_FULLSCREEN = true;
     public static final String ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING = "checkbox_enable_stream_inactivity_timeout";
     public static final String STREAM_INACTIVITY_TIMEOUT_HOURS_PREF_STRING = "seekbar_stream_inactivity_timeout_hours";
     private static final String BIND_ALL_USB_STRING = "checkbox_usb_bind_all";

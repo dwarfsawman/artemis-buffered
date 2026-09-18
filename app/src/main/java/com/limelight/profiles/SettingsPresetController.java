@@ -181,12 +181,16 @@ public final class SettingsPresetController {
     }
 
     private boolean isRequiredDefaultKey(String key) {
-        return PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING.equals(key) ||
+        return PreferenceConfiguration.LAUNCH_FULLSCREEN_PREF_STRING.equals(key) ||
+                PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING.equals(key) ||
                 PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING.equals(key) ||
                 PreferenceConfiguration.STREAM_INACTIVITY_TIMEOUT_HOURS_PREF_STRING.equals(key);
     }
 
     private Object getRequiredDefaultValue(String key) {
+        if (PreferenceConfiguration.LAUNCH_FULLSCREEN_PREF_STRING.equals(key)) {
+            return settings.getBoolean(key, PreferenceConfiguration.DEFAULT_LAUNCH_FULLSCREEN);
+        }
         if (PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING.equals(key)) {
             return PreferenceConfiguration.getFixedAudioBufferMs(settings);
         }
@@ -198,6 +202,9 @@ public final class SettingsPresetController {
     }
 
     private Object getMigrationDefaultValue(String key) {
+        if (PreferenceConfiguration.LAUNCH_FULLSCREEN_PREF_STRING.equals(key)) {
+            return PreferenceConfiguration.DEFAULT_LAUNCH_FULLSCREEN;
+        }
         if (PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING.equals(key)) {
             return PreferenceConfiguration.DEFAULT_FIXED_AUDIO_BUFFER_MS;
         }
@@ -325,6 +332,9 @@ public final class SettingsPresetController {
 
     private static Object getEffectiveCurrentValue(Map<String, ?> currentValues, String key) {
         Object value = currentValues.get(key);
+        if (PreferenceConfiguration.LAUNCH_FULLSCREEN_PREF_STRING.equals(key)) {
+            return value instanceof Boolean ? value : PreferenceConfiguration.DEFAULT_LAUNCH_FULLSCREEN;
+        }
         if (PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING.equals(key)) {
             return value instanceof Boolean ? value :
                     PreferenceConfiguration.DEFAULT_ENABLE_STREAM_INACTIVITY_TIMEOUT;

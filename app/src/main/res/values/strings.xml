@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="title_launch_fullscreen">Launch fullscreen in DeX</string>
+    <string name="summary_launch_fullscreen">Request fullscreen in Samsung DeX when opening the app from its icon. Off uses the system window size. Applies on the next launch; can be saved in presets.</string>
     <!-- Shortcut strings -->
     <string name="scut_deleted_pc">PC deleted</string>
     <string name="scut_not_paired">PC not paired</string>

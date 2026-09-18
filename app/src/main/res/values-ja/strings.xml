@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="title_launch_fullscreen">DeXで全画面起動</string>
+    <string name="summary_launch_fullscreen">アプリアイコンから開く際、Samsung DeXで全画面起動します。OFFではOSの通常のウィンドウサイズを使用します。次回起動から反映され、プリセットに保存できます。</string>
     <!-- PC view menu entries -->
     <string name="pcview_menu_app_list">ゲームリストを表示</string>
     <string name="pcview_menu_pair_pc">コンピュータとペアリング</string>

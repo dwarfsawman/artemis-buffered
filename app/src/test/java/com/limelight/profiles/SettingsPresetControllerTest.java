@@ -63,6 +63,7 @@ public class SettingsPresetControllerTest {
                 BITRATE_KEY,
                 UNSET_KEY,
                 STRING_SET_KEY,
+                PreferenceConfiguration.LAUNCH_FULLSCREEN_PREF_STRING,
                 PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING,
                 PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING,
                 PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING,
@@ -289,6 +290,65 @@ public class SettingsPresetControllerTest {
         assertEquals(PreferenceConfiguration.DEFAULT_FIXED_AUDIO_BUFFER_MS,
                 ((Number) reloadedManager.getProfiles().get(0).getOptions().get(
                         PreferenceConfiguration.FIXED_AUDIO_BUFFER_MS_PREF_STRING)).intValue());
+    }
+
+    @Test
+    public void fullscreenPresetsPersistAndControlTheNextLaunch() {
+        String key = PreferenceConfiguration.LAUNCH_FULLSCREEN_PREF_STRING;
+        SettingsProfile fullscreen = controller.addPreset("Fullscreen");
+        assertEquals(true, fullscreen.getOptions().get(key));
+        assertFalse(controller.isDirty(fullscreen));
+        settings.edit().putBoolean(key, false).commit();
+        assertTrue(controller.isDirty(fullscreen));
+        SettingsProfile windowed = controller.addPreset("Windowed");
+        assertEquals(false, windowed.getOptions().get(key));
+
+        ProfilesManager.instance = null;
+        ProfilesManager manager = ProfilesManager.getInstance();
+        assertTrue(manager.load(context));
+        controller = new SettingsPresetController(context, settings,
+                new HashSet<>(Arrays.asList(key)));
+        SettingsProfile restoredFullscreen = controller.getPresets().get(0);
+        SettingsProfile restoredWindowed = controller.getPresets().get(1);
+        controller.selectPreset(restoredFullscreen);
+        assertTrue(manager.getOverlayingSharedPreferences(context).getBoolean(key, false));
+        controller.selectPreset(restoredWindowed);
+        assertFalse(manager.getOverlayingSharedPreferences(context).getBoolean(key, true));
+
+        org.robolectric.shadows.ShadowBuild.setManufacturer("samsung");
+        com.limelight.LaunchTrampoline launch = org.robolectric.Robolectric
+                .buildActivity(com.limelight.LaunchTrampoline.class).create().get();
+        assertNull(org.robolectric.Shadows.shadowOf(launch)
+                .getNextStartedActivityForResult().options);
+
+        settings.edit().putBoolean(key, true).commit();
+        controller.savePreset(restoredWindowed);
+        assertEquals(true, restoredWindowed.getOptions().get(key));
+        settings.edit().putBoolean(key, false).commit();
+        controller.resetPreset(restoredWindowed);
+        assertTrue(settings.getBoolean(key, false));
+        assertFalse(controller.isDirty(restoredWindowed));
+    }
+
+    @Test
+    public void olderPresetMigratesToFullscreenEvenWhenGlobalValueIsOff() {
+        String key = PreferenceConfiguration.LAUNCH_FULLSCREEN_PREF_STRING;
+        HashMap<String, Object> options = new HashMap<>();
+        options.put(ProfilesManager.SNAPSHOT_VERSION_KEY, 1);
+        options.put(ProfilesManager.UNSET_KEYS_KEY, Arrays.asList(key));
+        SettingsProfile legacy = new SettingsProfile(java.util.UUID.randomUUID(), "Old",
+                1, 1, options);
+        ProfilesManager.getInstance().add(legacy);
+        settings.edit().putBoolean(key, false).commit();
+        controller = new SettingsPresetController(context, settings,
+                new HashSet<>(Arrays.asList(key)));
+        controller.selectPreset(legacy);
+        assertTrue(settings.getBoolean(key, false));
+        assertTrue(ProfilesManager.getInstance().getOverlayingSharedPreferences(context)
+                .getBoolean(key, false));
+        ProfilesManager.instance = null;
+        assertTrue(ProfilesManager.getInstance().load(context));
+        assertEquals(true, ProfilesManager.getInstance().getActive().getOptions().get(key));
     }
 
     private static void deleteRecursively(File file) {

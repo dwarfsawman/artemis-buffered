@@ -19,6 +19,13 @@
 
         <com.limelight.preferences.ArtemisSwitchPreference
             android:defaultValue="true"
+            android:key="checkbox_launch_fullscreen"
+            android:summary="@string/summary_launch_fullscreen"
+            android:title="@string/title_launch_fullscreen"
+            app:iconSpaceReserved="false" />
+
+        <com.limelight.preferences.ArtemisSwitchPreference
+            android:defaultValue="true"
             android:key="checkbox_enable_stream_inactivity_timeout"
             android:summary="@string/summary_checkbox_enable_stream_inactivity_timeout"
             android:title="@string/title_checkbox_enable_stream_inactivity_timeout"

@@ -29,6 +29,16 @@
 
 This experimental fork targets shared Wi-Fi environments such as internet cafés at around 50 ms ping. At the user's request, OpenAI Codex implemented an adaptive 20–80 ms AAudio/SPSC jitter buffer with correlation-selected WSOLA-style 0.97–1.03x time scaling. It starts at 40 ms and never pauses to refill after an underrun. Deep PLC is intentionally not included.
 
+## DeXで全画面起動
+
+設定の「Artemis Buffered」欄にある「DeXで全画面起動」で切り替えます（既定ON）。
+アプリアイコンからの次回起動時に、Samsung DeXへ全画面サイズを要求します。
+OFFはOSの通常のウィンドウサイズを使います。OSが前回の全画面状態を記憶している場合、OFFだけでは縮小されません。
+ON/OFFはプリセットに保存でき、既存プリセットの未設定値はONで補完されます。
+Samsung以外の端末とAndroid 7.0未満では通常起動します。
+既存タスクの再表示やストリーミング用ショートカットは対象外です。
+Samsung公式の[LaunchBounds方式](https://developer.samsung.com/samsung-dex/modify-optional.html)を使用しています。DeX実機での動作は未検証です。
+
 ## Upstream project
 
 ### Artemis Android

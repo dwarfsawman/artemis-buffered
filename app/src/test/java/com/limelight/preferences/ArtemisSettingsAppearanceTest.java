@@ -83,6 +83,8 @@ public class ArtemisSettingsAppearanceTest {
 
         assertEquals("category_artemis_buffered_settings", firstCategoryKey);
         assertEquals("com.limelight.preferences.ArtemisSwitchPreference",
+                customTags.get(PreferenceConfiguration.LAUNCH_FULLSCREEN_PREF_STRING));
+        assertEquals("com.limelight.preferences.ArtemisSwitchPreference",
                 customTags.get(PreferenceConfiguration.ENABLE_CALLBACK_AUDIO_BUFFER_PREF_STRING));
         assertEquals("com.limelight.preferences.ArtemisSwitchPreference",
                 customTags.get(PreferenceConfiguration.ENABLE_STREAM_INACTIVITY_TIMEOUT_PREF_STRING));
