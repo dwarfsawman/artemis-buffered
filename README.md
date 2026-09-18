@@ -115,6 +115,9 @@ The main repo had stayed silent for 5 months, with nobody actually responding to
 * In moonlight-android/, create a file called ‘local.properties’. Add an ‘ndk.dir=’ property to the local.properties file and set it equal to your NDK directory.
 * Build the APK using Android Studio or gradle
 
+## Release Process
+新規バージョンのビルド・検証・コミット・プッシュ・GitHub Releasesへの公開手順は [RELEASE.md](RELEASE.md) を参照してください。エージェントがリリースを依頼された際は、必ず GitHub Releases の作成まで実施してください。
+
 ## Authors
 
 * [Cameron Gutman](https://github.com/cgutman)  
