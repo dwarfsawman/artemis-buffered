@@ -6,6 +6,11 @@ on:
     paths-ignore: ['README.md', 'docs/**']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to build and upload a Windows ZIP for
+        required: false
+        type: string
   release:
     types: [published]
 
@@ -29,11 +34,17 @@ jobs:
           arch: win64_msvc2022_64
           modules: qtmultimedia
       - uses: ilammy/msvc-dev-cmd@v1
+      - name: Provide vswhere for upstream build script
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vswhere)) { throw "vswhere.exe not found at $vswhere" }
+          Copy-Item -LiteralPath $vswhere -Destination desktop/scripts/vswhere.exe
       - name: Set desktop version from tag
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || inputs.release_tag != ''
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
         run: |
           $tag = $env:RELEASE_TAG
           if ($tag -notmatch '^v(\d+)\.(\d+)\.(\d+)(?:-buffered\.(\d+))?$') { throw "Unsupported release tag: $tag" }
@@ -49,12 +60,13 @@ jobs:
           $env:PATH = "$env:Qt6_DIR\bin;$env:PATH"
           cmd /c "scripts\build-artemis-arch.bat release"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Get-ChildItem build/installer-x64-release/ArtemisPortable-*.zip -ErrorAction SilentlyContinue)) { throw 'Portable ZIP was not generated' }
       - name: Name portable asset
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
         run: |
-          $version = if ('${{ github.event_name }}' -eq 'release') { $env:RELEASE_TAG } else { '${{ github.sha }}'.Substring(0, 7) }
+          $version = if ($env:RELEASE_TAG) { $env:RELEASE_TAG } else { '${{ github.sha }}'.Substring(0, 7) }
           $source = Get-ChildItem desktop/build/installer-x64-release/ArtemisPortable-*.zip | Select-Object -First 1
           if (-not $source) { throw 'Portable ZIP was not generated' }
           Move-Item -LiteralPath $source.FullName -Destination "artemis-buffered-windows-x64-portable-$version.zip"
@@ -67,7 +79,7 @@ jobs:
           if-no-files-found: error
 
   release-windows:
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || inputs.release_tag != ''
     needs: windows-x64
     runs-on: ubuntu-latest
     permissions:
@@ -80,6 +92,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
         run: |
           gh release upload "$TAG" artemis-buffered-windows-x64-portable-"$TAG".zip --clobber
