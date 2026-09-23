@@ -1,0 +1,85 @@
+name: Windows x64 desktop portable
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['README.md', 'docs/**']
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Fetch desktop dependencies
+        run: git submodule update --init --recursive -- desktop/app/SDL_GameControllerDB desktop/h264bitstream/h264bitstream desktop/libs desktop/moonlight-common-c/moonlight-common-c desktop/qmdnsengine/qmdnsengine desktop/soundio/libsoundio
+      - uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Set desktop version from tag
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          if ($tag -notmatch '^v(\d+)\.(\d+)\.(\d+)(?:-buffered\.(\d+))?$') { throw "Unsupported release tag: $tag" }
+          $build = if ($Matches[4]) { $Matches[4] } else { '0' }
+          $version = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$build"
+          Set-Content -Path desktop/app/version.txt -Value $version -NoNewline -Encoding ascii
+      - name: Build upstream portable package
+        working-directory: desktop
+        shell: pwsh
+        env:
+          PORTABLE_ONLY: '1'
+        run: |
+          $env:PATH = "$env:Qt6_DIR\bin;$env:PATH"
+          cmd /c "scripts\build-artemis-arch.bat release"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Name portable asset
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          $version = if ('${{ github.event_name }}' -eq 'release') { $env:RELEASE_TAG } else { '${{ github.sha }}'.Substring(0, 7) }
+          $source = Get-ChildItem desktop/build/installer-x64-release/ArtemisPortable-*.zip | Select-Object -First 1
+          if (-not $source) { throw 'Portable ZIP was not generated' }
+          Move-Item -LiteralPath $source.FullName -Destination "artemis-buffered-windows-x64-portable-$version.zip"
+          "asset=artemis-buffered-windows-x64-portable-$version.zip" >> $env:GITHUB_OUTPUT
+        id: package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-portable
+          path: ${{ steps.package.outputs.asset }}
+          if-no-files-found: error
+
+  release-windows:
+    if: github.event_name == 'release'
+    needs: windows-x64
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-portable
+      - name: Add Windows ZIP to the tag release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "$TAG" artemis-buffered-windows-x64-portable-"$TAG".zip --clobber

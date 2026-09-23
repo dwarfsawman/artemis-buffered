@@ -1,3 +1,22 @@
 [submodule "app/src/main/jni/moonlight-core/moonlight-common-c"]
 	path = app/src/main/jni/moonlight-core/moonlight-common-c
 	url = https://github.com/ClassicOldSong/moonlight-common-c
+[submodule "desktop/moonlight-common-c/moonlight-common-c"]
+	path = desktop/moonlight-common-c/moonlight-common-c
+	url = https://github.com/ClassicOldSong/moonlight-common-c.git
+[submodule "desktop/qmdnsengine/qmdnsengine"]
+	path = desktop/qmdnsengine/qmdnsengine
+	url = https://github.com/cgutman/qmdnsengine.git
+[submodule "desktop/app/SDL_GameControllerDB"]
+	path = desktop/app/SDL_GameControllerDB
+	url = https://github.com/gabomdq/SDL_GameControllerDB.git
+[submodule "desktop/soundio/libsoundio"]
+	path = desktop/soundio/libsoundio
+	url = https://github.com/cgutman/libsoundio.git
+[submodule "desktop/h264bitstream/h264bitstream"]
+	path = desktop/h264bitstream/h264bitstream
+	url = https://github.com/aizvorski/h264bitstream.git
+[submodule "desktop/libs"]
+	path = desktop/libs
+	url = https://github.com/cgutman/moonlight-qt-prebuilts.git
+	shallow = true

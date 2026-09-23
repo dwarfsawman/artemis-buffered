@@ -66,3 +66,6 @@ gh release create v20.2.6-buffered.<N> dist/artemis-buffered-20.2.6-buffered.<N>
   --notes-file dist/release-<N>-notes.md
 ```
 ※ これにより https://github.com/dwarfsawman/artemis-buffered/releases に公開され、ユーザーや外部ツールからダウンロード可能になります。
+
+### Windows x64 ZIP の追加
+上記の Android APK 公開手順はそのまま実施します。Release の `published` イベントで `.github/workflows/desktop-windows-x64.yml` が Windows x64 portable ZIP をビルドし、同じ Release に `artemis-buffered-windows-x64-portable-v20.2.6-buffered.<N>.zip` を追加します。Windows ビルドが失敗しても Android APK の公開は取り消されません。workflow を手動実行した場合は Actions artifact として ZIP を取得できます。

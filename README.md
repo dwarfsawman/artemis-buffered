@@ -39,6 +39,32 @@ ON/OFFはプリセットに保存でき、既存プリセットの未設定値�
 Samsung以外の端末とAndroid 7.0未満では通常起動します。
 画面フォーカス復帰・画面構成変更時・再開時（onResume）に再適用します。
 
+## Artemis Buffered desktop (Windows x64)
+
+The Android client remains in `app/`. The Windows desktop client is in [`desktop/`](desktop/). Based on [wjbeckett/artemis](https://github.com/wjbeckett/artemis) (Artemis Qt), which in turn is based on Moonlight Qt. The upstream GPLv3 license and copyright notices are retained in `desktop/`. Desktop sources were imported from Artemis Qt `develop` commit `afe2de7f2b24a2f6161f5672e8aa38450fa793ef`; its dependency submodules are pinned to the same commits.
+
+On Windows, **Audio buffering** in the desktop Audio Settings offers Low latency, 40 ms, 60 ms, 80 ms, and 120 ms. Low latency is the default for existing settings. Buffered options select the existing libsoundio/WASAPI renderer, wait for the selected amount of decoded PCM in its ring buffer once at startup, then continue playing. An underrun inserts silence for missing frames without flushing or priming again. There is no adaptive buffering, time stretching, or playback speed adjustment. The streaming session also disables SDL text input after video initialization so local IME composition does not appear over the client; normal key events still go to the host.
+
+### Windows x64 build
+
+Install Visual Studio 2022 with the MSVC x64 toolchain, Qt 6.8.3 `win64_msvc2022_64` with Qt Multimedia, and 7-Zip. Then run in a Developer PowerShell:
+
+```powershell
+git submodule update --init --recursive -- desktop/app/SDL_GameControllerDB desktop/h264bitstream/h264bitstream desktop/libs desktop/moonlight-common-c/moonlight-common-c desktop/qmdnsengine/qmdnsengine desktop/soundio/libsoundio
+cd desktop
+$env:PATH = "C:\Qt\6.8.3\msvc2022_64\bin;$env:PATH"
+$env:PORTABLE_ONLY = '1'
+cmd /c 'scripts\build-artemis-arch.bat release'
+```
+
+The portable ZIP is generated in `desktop/build/installer-x64-release/`. The top-level [Windows workflow](.github/workflows/desktop-windows-x64.yml) runs the same build and names its asset `artemis-buffered-windows-x64-portable-<tag>.zip`, including tags such as `v20.2.6-buffered.18`. After the existing Android process publishes a GitHub Release, the workflow adds the ZIP to that release without replacing Android assets. A failed Windows build does not block Android publication. The current Android `main` references a Moonlight common C submodule commit that its configured public remote does not serve; desktop builds fetch only their own pinned submodules so this existing Android issue does not block Windows ZIP creation.
+
+### Desktop audio path
+
+`Opus packet → Opus decoder → SoundIoAudioRenderer ring → one-time PCM priming → libsoundio callback (silence on shortage) → WASAPI → output device`
+
+Set SDL's application log level to debug to see ring fill, underrun count, and silence frame count at five-second intervals while streaming. Host connection, audio behavior, and Japanese IME behavior need a Windows client and compatible remote host for end-to-end verification.
+
 ## Upstream project
 
 ### Artemis Android

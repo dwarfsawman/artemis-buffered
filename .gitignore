@@ -2,6 +2,7 @@
 *.apk
 *.ap_
 *.aab
+dist/*.zip
 output.json
 output-metadata.json
 out/

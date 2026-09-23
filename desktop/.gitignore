@@ -1,0 +1,75 @@
+# Qt build artifacts
+Makefile*
+*.o
+*.a
+*.app/
+.qmake.cache
+.qmake.stash
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.pro.user*
+
+# Build directories
+build/
+release/
+debug/
+
+# Platform specific
+*.dmg
+*.exe
+*.deb
+*.rpm
+*.AppImage
+*.zip
+*.tar.gz
+
+# Qt Creator
+*.pro.user
+*.autosave
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Windows
+Thumbs.db
+*.pdb
+
+# Logs
+*.log
+
+# Dependencies
+node_modules/
+
+# Generated QML cache
+*qmlcache*
+
+# Config tests
+config.tests/*/.qmake.stash
+config.tests/*/Makefile
+
+# Visual Studio
+**/.vs/
+*.a
+*.o
+config.log
+Makefile*
+release/
+debug/
+h264bitstream/h264bitstream
+moonlight-common-c/moonlight-common-c
+*.a
+config.log
+**/qml_qmlcache.qrc
+*.a
+config.log
+**/qml_qmlcache.qrc
