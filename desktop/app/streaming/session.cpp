@@ -29,12 +29,33 @@
 #ifdef Q_OS_WIN32
 #include <SDL_syswm.h>
 #include <dwmapi.h>
+#include <imm.h>
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE_OLD
 #define DWMWA_USE_IMMERSIVE_DARK_MODE_OLD 19
 #endif
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
 #endif
+
+// Disassociate the IME context from the streaming window to prevent
+// local IME composition UI (e.g. Japanese IME uncommitted character box)
+// from appearing on the client side while streaming. Raw key events are still
+// delivered to SDL and forwarded to the host.
+static void disableImeForWindow(SDL_Window* window)
+{
+    SDL_StopTextInput();
+
+    if (window != nullptr) {
+        SDL_SysWMinfo info;
+        SDL_VERSION(&info.version);
+        if (SDL_GetWindowWMInfo(window, &info) && info.subsystem == SDL_SYSWM_WINDOWS) {
+            HWND hwnd = info.info.win.window;
+            if (hwnd != nullptr) {
+                ImmAssociateContext(hwnd, nullptr);
+            }
+        }
+    }
+}
 #endif
 
 
@@ -2141,8 +2162,13 @@ void Session::execInternal()
     // Stop text input. SDL enables it by default
     // when we initialize the video subsystem, but this
     // causes an IME popup when certain keys are held down
-    // on macOS.
+    // on macOS. On Windows, explicitly disassociate the IME
+    // context from the streaming window to prevent local composition.
+#ifdef Q_OS_WIN32
+    disableImeForWindow(m_Window);
+#else
     SDL_StopTextInput();
+#endif
 
     // Disable the screen saver if requested
     if (m_Preferences->keepAwake) {
@@ -2267,9 +2293,22 @@ void Session::execInternal()
                 }
                 break;
             case SDL_WINDOWEVENT_FOCUS_GAINED:
+#ifdef Q_OS_WIN32
+                disableImeForWindow(m_Window);
+#else
+                SDL_StopTextInput();
+#endif
                 if (m_Preferences->muteOnFocusLoss) {
                     m_AudioMuted = false;
                 }
+                break;
+            case SDL_WINDOWEVENT_RESTORED:
+            case SDL_WINDOWEVENT_SHOWN:
+#ifdef Q_OS_WIN32
+                disableImeForWindow(m_Window);
+#else
+                SDL_StopTextInput();
+#endif
                 break;
             case SDL_WINDOWEVENT_LEAVE:
                 m_InputHandler->notifyMouseLeave();
