@@ -52,12 +52,13 @@ Install Visual Studio 2022 with the MSVC x64 toolchain, Qt 6.8.3 `win64_msvc2022
 ```powershell
 git submodule update --init --recursive -- desktop/app/SDL_GameControllerDB desktop/h264bitstream/h264bitstream desktop/libs desktop/moonlight-common-c/moonlight-common-c desktop/qmdnsengine/qmdnsengine desktop/soundio/libsoundio
 cd desktop
+Copy-Item (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe') scripts\vswhere.exe
 $env:PATH = "C:\Qt\6.8.3\msvc2022_64\bin;$env:PATH"
 $env:PORTABLE_ONLY = '1'
 cmd /c 'scripts\build-artemis-arch.bat release'
 ```
 
-The portable ZIP is generated in `desktop/build/installer-x64-release/`. The top-level [Windows workflow](.github/workflows/desktop-windows-x64.yml) runs the same build and names its asset `artemis-buffered-windows-x64-portable-<tag>.zip`, including tags such as `v20.2.6-buffered.18`. After the existing Android process publishes a GitHub Release, the workflow adds the ZIP to that release without replacing Android assets. A failed Windows build does not block Android publication. The current Android `main` references a Moonlight common C submodule commit that its configured public remote does not serve; desktop builds fetch only their own pinned submodules so this existing Android issue does not block Windows ZIP creation.
+The portable ZIP is generated in `desktop/build/installer-x64-release/`. The top-level [Windows workflow](.github/workflows/desktop-windows-x64.yml) runs the same build and names its asset `artemis-buffered-windows-x64-portable-<tag>.zip`, including tags such as `v20.2.6-buffered.19`. After the existing Android process publishes a GitHub Release, the workflow adds the ZIP to that release without replacing Android assets. A failed Windows build does not block Android publication. The current Android `main` references a Moonlight common C submodule commit that its configured public remote does not serve; desktop builds fetch only their own pinned submodules so this existing Android issue does not block Windows ZIP creation.
 
 ### Desktop audio path
 
