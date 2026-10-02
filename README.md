@@ -13,21 +13,26 @@
 
 ## このフォークの音声変更
 
-- 「固定40 msコールバック音声バッファ」は既定でオフ。オフ時はクローン時点と同じ従来のAudioTrack動作
-- 固定40 ms設定をオンにすると「適応20～80 ms＋WSOLA型処理」を選択可能
+- 「コールバック音声バッファ」は既定でオフ。オフ時は従来のAudioTrack動作
+- オンにすると固定40～120 ms、または「適応音声バッファ（クロスフェード補正）」を選択可能
 - Android 8.1以降では、AAudioデータコールバックとlock-free SPSCリングバッファを使用
 - 初回は40 ms蓄積してから再生を開始
-- 到着ジッターに応じて目標バッファを20～80 msで適応制御
-- WSOLA型の相関選択付きoverlap-addにより、必要なときだけ0.97～1.03倍で時間伸縮
-- アンダーラン後は停止・flush・40 msの再蓄積を行わず、不足分を無音にして再生を継続
+- 適応モードは通常のPCMをそのまま再生し、パケットごとの時間伸縮や再生速度変更を行わない
+- 目標は40 msから開始し、音声不足・不足寸前の状態に応じて最大90 msまで増やす。安定後は基本25 msへ段階的に戻す
+- 平均蓄積量の過剰が2秒続いた場合に、音声1パケットを約2 msのクロスフェードで削除して長期的な遅延増加を抑える
+- 短い不足は不足分を無音にし、持続した不足や目標に蓄積が追い付いていない場合は、AAudioを止めずに条件付きで再蓄積する
+- 適応モードのAAudio出力バッファは3 burstから開始し、端末のXRun発生時にburst単位で増やす
+- 固定モードでは指定量の初回蓄積と、アンダーラン時に不足分を無音にする従来動作を維持
 - Android 8.0以前、AAudioを利用できない端末、Audio FX使用時は従来のAudioTrackへフォールバック
 - Opus Deep PLCは含めず、元のPLC動作を維持
 
-120秒、5 ms音声パケット、片道15～35 ms（RTT 30～70 ms）、1%に6 msのスケジューラ揺らぎを加えた決定論的試験では、固定40 ms版と適応版の音声枯渇はいずれも0で、平均リング量は41.23 msから30.76 msへ減少しました。これは実機Wi-Fi試験ではなくアプリ側シミュレーションであり、端末固有のAAudioバースト、ミキサー、CPU負荷、聴感品質は別途確認が必要です。
+旧20～80 ms＋WSOLA型処理はbuffered.21で置き換えました。設定キーを維持しているため、以前ONだったトグルは新方式のONとして引き継がれます。移植元はpunktfunkの共有音声ポリシー（MIT、commit `d016f73683b6b96ca64da99679ca5f4005846726`）で、由来と許諾文は`third_party/punktfunk/`とAPK内の`assets/licenses/punktfunk-audio.txt`に保存しています。ホスト側の変更は不要です。映像との厳密な時刻同期や、新しいパケット未到着時PLCはこの移植には含めていません。
+
+アプリで使うCコードそのものに対し、無加工再生、過剰蓄積、到着バースト、目標の増減、再蓄積、異なる出力量・チャンネル数、5分間の±200/500 ppmクロックずれを検証する18件の試験が通過しました。Windowsでは`app/src/test/native/run-tests.ps1`で再現できます。端末固有のAAudioバースト、ミキサー、CPU負荷、実機Wi-Fiでの聴感品質は別途確認が必要です。
 
 ### English summary
 
-This experimental fork targets shared Wi-Fi environments such as internet cafés at around 50 ms ping. At the user's request, OpenAI Codex implemented an adaptive 20–80 ms AAudio/SPSC jitter buffer with correlation-selected WSOLA-style 0.97–1.03x time scaling. It starts at 40 ms and never pauses to refill after an underrun. Deep PLC is intentionally not included.
+This experimental fork targets shared Wi-Fi environments such as internet cafés. Buffered.21 replaces per-packet WSOLA-style scaling with an adaptive crossfade buffer derived from punktfunk's MIT-licensed audio policy. Normal PCM plays unchanged. Sustained excess is corrected with an occasional crossfaded packet drop, starvation can trigger conditional refill without stopping AAudio, and device XRuns grow the output buffer. It starts at 40 ms, with a 25 ms base and a 90 ms adaptive target ceiling. Existing toggle values are retained. No host changes are required; timestamp-based A/V sync and additional drought PLC are outside this port.
 
 ## DeXで全画面起動
 

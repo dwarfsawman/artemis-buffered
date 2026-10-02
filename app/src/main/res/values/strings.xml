@@ -473,8 +473,8 @@
     <string name="summary_checkbox_enable_callback_audio_buffer">Off (default): use the original AudioTrack behavior from the cloned repository. On: use an AAudio callback + SPSC ring on Android 8.1+ and show the fixed-buffer control below. Audio effects continue to use AudioTrack.</string>
     <string name="title_seekbar_fixed_audio_buffer_ms">Fixed audio buffer (ms)</string>
     <string name="summary_seekbar_fixed_audio_buffer_ms">Choose 40–120 ms in 10 ms steps. A larger buffer is more resistant to interruptions, but adds audio latency. This value is used only when adaptive mode is off.</string>
-    <string name="title_checkbox_enable_adaptive_audio_buffer">Adaptive 20–80 ms + WSOLA-style processing</string>
-    <string name="summary_checkbox_enable_adaptive_audio_buffer">Requires the callback audio buffer above. Off: use the selected fixed buffer without WSOLA. On: adaptive 20–80 ms target with WSOLA-style time stretching. Neither mode re-buffers after an underrun.</string>
+    <string name="title_checkbox_enable_adaptive_audio_buffer">Adaptive audio buffer (crossfade correction)</string>
+    <string name="summary_checkbox_enable_adaptive_audio_buffer">Requires the callback audio buffer above. On: plays audio at its original speed, adapts buffering to interruptions, and corrects sustained excess with short crossfades. Refills after sustained starvation. Off: uses the selected fixed buffer.</string>
     <string name="title_share_audio_diagnostic_logs">Share audio diagnostic logs</string>
     <string name="summary_share_audio_diagnostic_logs">Export recent audio session logs as a ZIP file for analysis</string>
     <string name="toast_no_audio_diagnostic_logs">No audio diagnostic logs have been recorded yet</string>

@@ -3,7 +3,6 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <jni.h>
-#include <math.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdatomic.h>
@@ -13,11 +12,8 @@
 #include <string.h>
 #include <time.h>
 
-#if defined(__aarch64__)
-#include <arm_neon.h>
-#endif
-
 #include "aaudio_renderer.h"
+#include "audio_buffer_policy.h"
 
 #define LOG_TAG "ArtemisAAudio"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -75,45 +71,42 @@ typedef struct {
 typedef struct {
     AAudioStream* stream;
     int16_t* ring;
-    int16_t* stretchBuffer;
     uint32_t capacityFrames;
-    uint32_t steadyCapacityFrames;
-    uint32_t stretchCapacityFrames;
-    uint32_t minTargetFrames;
-    uint32_t maxTargetFrames;
+    atomic_uint steadyCapacityFrames;
+    AudioBufferPolicy bufferPolicy;
+    uint32_t xrunCheckCallbacks;
+    int32_t lastXrun;
     uint32_t fixedTargetMs;
     int32_t sampleRate;
     int32_t channelCount;
     bool adaptive;
     bool diagnosticsEnabled;
     int32_t framesPerBurst;
-    int32_t bufferSizeFrames;
+    atomic_int bufferSizeFrames;
     int32_t bufferCapacityFrames;
     int32_t performanceMode;
     int32_t sharingMode;
-    int64_t lastArrivalNs;
     int64_t lastDeliveryNs;
-    int64_t lastTargetDecreaseNs;
-    int64_t protectionUntilNs;
-    uint32_t previousPacketFrames;
     uint32_t previousDeliveryFrames;
-    uint32_t observedUnderrunCallbacks;
-    double jitterMs;
     atomic_uint readFrame;
     atomic_uint writeFrame;
     atomic_uint targetFrames;
     atomic_bool armed;
     atomic_bool started;
     atomic_bool primed;
+    atomic_bool startupComplete;
     atomic_bool closing;
     atomic_bool recoveryRequested;
     atomic_bool recovering;
     atomic_uint underrunCallbacks;
     atomic_uint underrunFrames;
     atomic_uint droppedFrames;
-    atomic_int playbackRatePpm;
-    atomic_int jitterMicros;
-    atomic_llong timeStretchFrameDelta;
+    atomic_uint crossfadeDrops;
+    atomic_uint averageDepthFrames;
+    atomic_ullong crossfadeDroppedFrames;
+    atomic_uint rebufferCount;
+    atomic_uint hardTrimCount;
+    atomic_uint hardwareBufferGrowthCount;
     atomic_int lastError;
     atomic_int streamState;
     atomic_ullong armTimeNs;
@@ -138,16 +131,8 @@ typedef struct {
 enum {
     MIN_FIXED_TARGET_MS = 40,
     MAX_FIXED_TARGET_MS = 120,
-    MIN_TARGET_MS = 20,
-    INITIAL_TARGET_MS = 40,
-    MAX_TARGET_MS = 80,
     RING_HEADROOM_MS = 100,
     STARTUP_CAPACITY_MS = 2000,
-    TARGET_DECREASE_INTERVAL_MS = 1000,
-    UNDERRUN_PROTECTION_MS = 5000,
-    RATE_ONE_PPM = 1000000,
-    RATE_MIN_PPM = 970000,
-    RATE_MAX_PPM = 1030000,
     DIAGNOSTIC_EVENT_STREAM_OPENED = 1,
     DIAGNOSTIC_EVENT_ARMED = 2,
     DIAGNOSTIC_EVENT_START_REQUESTED = 3,
@@ -158,7 +143,9 @@ enum {
     DIAGNOSTIC_EVENT_STREAM_ERROR = 8,
     DIAGNOSTIC_EVENT_DELIVERY_GAP = 9,
     DIAGNOSTIC_EVENT_PRIMED = 10,
-    NATIVE_STATS_COUNT = 21,
+    DIAGNOSTIC_EVENT_REBUFFERING = 11,
+    DIAGNOSTIC_EVENT_CROSSFADE_DROP = 12,
+    NATIVE_STATS_COUNT = 24,
 };
 
 static AAudioApi gApi;
@@ -226,12 +213,6 @@ static const char* resultText(aaudio_result_t result) {
         return gApi.convertResultToText(result);
     }
     return "unknown";
-}
-
-static int64_t monotonicTimeNs(void) {
-    struct timespec now;
-    clock_gettime(CLOCK_MONOTONIC, &now);
-    return (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec;
 }
 
 // Matches android.os.SystemClock.elapsedRealtimeNanos(), including time spent suspended.
@@ -306,16 +287,6 @@ static uint32_t framesForMs(const AAudioRenderer* renderer, uint32_t millisecond
     return (uint32_t)(((int64_t)renderer->sampleRate * milliseconds) / 1000);
 }
 
-static uint32_t clampFrames(uint32_t value, uint32_t minimum, uint32_t maximum) {
-    if (value < minimum) {
-        return minimum;
-    }
-    if (value > maximum) {
-        return maximum;
-    }
-    return value;
-}
-
 static void copyFromRing(AAudioRenderer* renderer, int16_t* destination,
                          uint32_t readFrame, uint32_t frames) {
     uint32_t ringIndex = readFrame % renderer->capacityFrames;
@@ -358,9 +329,26 @@ static void copyToRing(AAudioRenderer* renderer, const int16_t* source,
     }
 }
 
+static void growHardwareBuffer(AAudioRenderer* renderer, AAudioStream* stream) {
+    if (!renderer->adaptive || ++renderer->xrunCheckCallbacks % 128 != 0) return;
+    int32_t xruns = gApi.streamGetXRunCount(stream);
+    if (xruns <= renderer->lastXrun) return;
+    renderer->lastXrun = xruns;
+    int32_t burst = gApi.streamGetFramesPerBurst(stream);
+    int32_t current = gApi.streamGetBufferSizeInFrames(stream);
+    int32_t capacity = gApi.streamGetBufferCapacityInFrames(stream);
+    int32_t grown = current + (burst > 0 ? burst : 1);
+    if (grown > capacity) grown = capacity;
+    if (grown <= current) return;
+    int32_t result = gApi.streamSetBufferSizeInFrames(stream, grown);
+    if (result > current) {
+        atomic_store_explicit(&renderer->bufferSizeFrames, result, memory_order_relaxed);
+        atomic_fetch_add_explicit(&renderer->hardwareBufferGrowthCount, 1, memory_order_relaxed);
+    }
+}
+
 static aaudio_data_callback_result_t dataCallback(AAudioStream* stream, void* userData,
                                                    void* audioData, int32_t numFrames) {
-    (void)stream;
     AAudioRenderer* renderer = (AAudioRenderer*)userData;
     int16_t* output = (int16_t*)audioData;
 
@@ -371,6 +359,7 @@ static aaudio_data_callback_result_t dataCallback(AAudioStream* stream, void* us
         return AAUDIO_CALLBACK_RESULT_STOP;
     }
 
+    growHardwareBuffer(renderer, stream);
     uint32_t readFrame = atomic_load_explicit(&renderer->readFrame, memory_order_relaxed);
     uint32_t writeFrame = atomic_load_explicit(&renderer->writeFrame, memory_order_acquire);
     uint32_t availableFrames = writeFrame - readFrame;
@@ -425,11 +414,65 @@ static aaudio_data_callback_result_t dataCallback(AAudioStream* stream, void* us
         }
     }
 
+    if (renderer->adaptive) {
+        AudioBufferPolicy* policy = &renderer->bufferPolicy;
+        // Large device quanta need a quantum plus a packet even when above the 90 ms target.
+        uint32_t quantumCapacity = requestedFrames * 2 + policy->packetFrames;
+        uint32_t budget = atomic_load_explicit(&renderer->steadyCapacityFrames, memory_order_relaxed);
+        if (quantumCapacity > budget) {
+            atomic_store_explicit(&renderer->steadyCapacityFrames,
+                    quantumCapacity < renderer->capacityFrames ? quantumCapacity : renderer->capacityFrames,
+                    memory_order_relaxed);
+        }
+        uint32_t discardedStartupFrames = 0;
+        if (!atomic_load_explicit(&renderer->startupComplete, memory_order_acquire)) {
+            uint32_t startupTarget = AudioBufferPolicyTarget(policy, requestedFrames);
+            if (availableFrames >= startupTarget) {
+                // Trim device-route warm-up backlog only once, never on a re-prime.
+                discardedStartupFrames = availableFrames - startupTarget;
+                readFrame += discardedStartupFrames;
+                availableFrames = startupTarget;
+            }
+        }
+        bool wasPrimed = policy->primed;
+        AudioBufferStep step = AudioBufferPolicyNext(policy, availableFrames, requestedFrames);
+        if (step.dropFrames > 0) {
+            AudioBufferCrossfadeDrop(renderer->ring, renderer->capacityFrames,
+                    renderer->channelCount, readFrame, step.dropFrames, step.fadeFrames);
+            readFrame += step.dropFrames;
+            availableFrames -= step.dropFrames;
+            atomic_fetch_add_explicit(&renderer->crossfadeDrops, 1, memory_order_relaxed);
+            atomic_fetch_add_explicit(&renderer->crossfadeDroppedFrames, step.dropFrames,
+                                      memory_order_relaxed);
+            if (step.hardTrim) atomic_fetch_add_explicit(&renderer->hardTrimCount, 1, memory_order_relaxed);
+            enqueueDiagnosticEvent(renderer, DIAGNOSTIC_EVENT_CROSSFADE_DROP, callbackTimeNs,
+                    step.dropFrames, step.fadeFrames, availableFrames, step.targetFrames,
+                    step.hardTrim, requestedFrames, 0);
+        }
+        atomic_store_explicit(&renderer->readFrame, readFrame, memory_order_release);
+        atomic_store_explicit(&renderer->targetFrames, step.targetFrames, memory_order_release);
+        atomic_store_explicit(&renderer->averageDepthFrames, (uint32_t)policy->averageFrames,
+                              memory_order_relaxed);
+        atomic_store_explicit(&renderer->primed, policy->primed, memory_order_release);
+        if (step.silence) {
+            memset(output, 0, (size_t)requestedFrames * renderer->channelCount * sizeof(int16_t));
+            return AAUDIO_CALLBACK_RESULT_CONTINUE;
+        }
+        atomic_store_explicit(&renderer->startupComplete, true, memory_order_release);
+        if (!wasPrimed) {
+            enqueueDiagnosticEvent(renderer, DIAGNOSTIC_EVENT_PRIMED, callbackTimeNs,
+                    availableFrames + discardedStartupFrames, step.targetFrames,
+                    discardedStartupFrames, requestedFrames, callbackNumber,
+                    callbackGapMicros, renderer->capacityFrames);
+        }
+    }
+
+    // Fixed mode retains its one-time startup priming.
     // Start AAudio as soon as the renderer is armed so device-route warm-up happens before
     // useful PCM playback. Until the initial target is available, callbacks emit silence
     // without consuming the ring or reporting expected startup underruns. If the device paused
     // its callback during warm-up, discard stale startup PCM and begin from the newest target.
-    if (!atomic_load_explicit(&renderer->primed, memory_order_acquire)) {
+    if (!renderer->adaptive && !atomic_load_explicit(&renderer->primed, memory_order_acquire)) {
         uint32_t targetFrames = atomic_load_explicit(&renderer->targetFrames,
                                                      memory_order_acquire);
         if (availableFrames < targetFrames) {
@@ -445,6 +488,7 @@ static aaudio_data_callback_result_t dataCallback(AAudioStream* stream, void* us
             atomic_store_explicit(&renderer->readFrame, readFrame, memory_order_release);
         }
         atomic_store_explicit(&renderer->primed, true, memory_order_release);
+        atomic_store_explicit(&renderer->startupComplete, true, memory_order_release);
         enqueueDiagnosticEvent(renderer,
                                DIAGNOSTIC_EVENT_PRIMED,
                                callbackTimeNs,
@@ -486,6 +530,19 @@ static aaudio_data_callback_result_t dataCallback(AAudioStream* stream, void* us
                                                     memory_order_relaxed));
     }
 
+    if (renderer->adaptive) {
+        AudioBufferPolicyRead(&renderer->bufferPolicy, copiedFrames < requestedFrames);
+        bool primed = renderer->bufferPolicy.primed;
+        atomic_store_explicit(&renderer->primed, primed, memory_order_release);
+        uint32_t target = AudioBufferPolicyTarget(&renderer->bufferPolicy, requestedFrames);
+        atomic_store_explicit(&renderer->targetFrames, target, memory_order_release);
+        if (!primed) {
+            uint32_t count = atomic_fetch_add_explicit(&renderer->rebufferCount, 1,
+                                                       memory_order_relaxed) + 1;
+            enqueueDiagnosticEvent(renderer, DIAGNOSTIC_EVENT_REBUFFERING, callbackTimeNs,
+                    availableFrames, requestedFrames, target, count, 0, 0, 0);
+        }
+    }
     return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
 
@@ -670,9 +727,9 @@ static aaudio_result_t openStreamLocked(AAudioRenderer* renderer) {
     renderer->framesPerBurst = gApi.streamGetFramesPerBurst(stream);
     if (renderer->framesPerBurst > 0) {
         aaudio_result_t bufferResult =
-                gApi.streamSetBufferSizeInFrames(stream, renderer->framesPerBurst * 2);
+                gApi.streamSetBufferSizeInFrames(stream, renderer->framesPerBurst * (renderer->adaptive ? 3 : 2));
         if (bufferResult < 0) {
-            LOGW("Unable to set two-burst AAudio buffer: %d (%s)",
+            LOGW("Unable to set initial AAudio buffer: %d (%s)",
                  bufferResult, resultText(bufferResult));
         }
     }
@@ -696,7 +753,7 @@ static aaudio_result_t openStreamLocked(AAudioRenderer* renderer) {
                            renderer->sharingMode);
 
     if (renderer->adaptive) {
-        LOGI("AAudio opened: %d Hz, %d channels, target=20-80 ms adaptive, initial=40 ms, steady capacity=%u frames, startup capacity=%u frames, burst=%d, mode=%d",
+        LOGI("AAudio opened: %d Hz, %d channels, adaptive crossfade buffer, base=25 ms, initial=40 ms, max target=90 ms, steady capacity=%u frames, startup capacity=%u frames, burst=%d, mode=%d",
              renderer->sampleRate, renderer->channelCount,
              renderer->steadyCapacityFrames, renderer->capacityFrames,
              renderer->framesPerBurst, renderer->performanceMode);
@@ -720,7 +777,15 @@ static void resetAfterDisconnect(AAudioRenderer* renderer) {
     atomic_store_explicit(&renderer->primed, false, memory_order_release);
     atomic_store_explicit(&renderer->firstCallbackTimeNs, 0, memory_order_release);
     atomic_store_explicit(&renderer->startRequestTimeNs, 0, memory_order_release);
-    atomic_store_explicit(&renderer->playbackRatePpm, RATE_ONE_PPM, memory_order_relaxed);
+    AudioBufferPolicyInit(&renderer->bufferPolicy, renderer->bufferPolicy.sampleRate,
+                          renderer->bufferPolicy.packetFrames);
+    atomic_store_explicit(&renderer->targetFrames, renderer->adaptive ?
+            framesForMs(renderer, AUDIO_BUFFER_INITIAL_MS) : framesForMs(renderer, renderer->fixedTargetMs),
+            memory_order_release);
+    atomic_store_explicit(&renderer->startupComplete, false, memory_order_release);
+    atomic_store_explicit(&renderer->averageDepthFrames, 0, memory_order_relaxed);
+    renderer->xrunCheckCallbacks = 0;
+    renderer->lastXrun = 0;
     renderer->lastCallbackTimeNs = 0;
 }
 
@@ -781,331 +846,6 @@ static void* recoveryThreadMain(void* opaque) {
     return NULL;
 }
 
-static double normalizedCorrelation(const AAudioRenderer* renderer, const int16_t* input,
-                                    uint32_t firstFrame, uint32_t secondFrame,
-                                    uint32_t frameCount) {
-    size_t sampleCount = (size_t)frameCount * renderer->channelCount;
-    const int16_t* firstSamples = input + (size_t)firstFrame * renderer->channelCount;
-    const int16_t* secondSamples = input + (size_t)secondFrame * renderer->channelCount;
-    int64_t cross = 0;
-    int64_t firstEnergy = 1;
-    int64_t secondEnergy = 1;
-    size_t sample = 0;
-
-#if defined(__aarch64__)
-    int64x2_t crossVector = vdupq_n_s64(0);
-    int64x2_t firstEnergyVector = vdupq_n_s64(0);
-    int64x2_t secondEnergyVector = vdupq_n_s64(0);
-    for (; sample + 8 <= sampleCount; sample += 8) {
-        int16x8_t first = vld1q_s16(firstSamples + sample);
-        int16x8_t second = vld1q_s16(secondSamples + sample);
-
-        int32x4_t crossLow = vmull_s16(vget_low_s16(first), vget_low_s16(second));
-        int32x4_t crossHigh = vmull_s16(vget_high_s16(first), vget_high_s16(second));
-        int32x4_t firstLow = vmull_s16(vget_low_s16(first), vget_low_s16(first));
-        int32x4_t firstHigh = vmull_s16(vget_high_s16(first), vget_high_s16(first));
-        int32x4_t secondLow = vmull_s16(vget_low_s16(second), vget_low_s16(second));
-        int32x4_t secondHigh = vmull_s16(vget_high_s16(second), vget_high_s16(second));
-
-        crossVector = vaddq_s64(crossVector, vpaddlq_s32(crossLow));
-        crossVector = vaddq_s64(crossVector, vpaddlq_s32(crossHigh));
-        firstEnergyVector = vaddq_s64(firstEnergyVector, vpaddlq_s32(firstLow));
-        firstEnergyVector = vaddq_s64(firstEnergyVector, vpaddlq_s32(firstHigh));
-        secondEnergyVector = vaddq_s64(secondEnergyVector, vpaddlq_s32(secondLow));
-        secondEnergyVector = vaddq_s64(secondEnergyVector, vpaddlq_s32(secondHigh));
-    }
-    cross += vaddvq_s64(crossVector);
-    firstEnergy += vaddvq_s64(firstEnergyVector);
-    secondEnergy += vaddvq_s64(secondEnergyVector);
-#endif
-
-    for (; sample < sampleCount; sample++) {
-        int32_t first = firstSamples[sample];
-        int32_t second = secondSamples[sample];
-        cross += (int64_t)first * second;
-        firstEnergy += (int64_t)first * first;
-        secondEnergy += (int64_t)second * second;
-    }
-    return (double)cross / sqrt((double)firstEnergy * (double)secondEnergy);
-}
-
-static uint32_t findBestSplice(const AAudioRenderer* renderer, const int16_t* input,
-                               uint32_t inputFrames, uint32_t overlapFrames,
-                               uint32_t adjustmentFrames, bool expanding) {
-    uint32_t minimumSplice = expanding ? overlapFrames + adjustmentFrames : overlapFrames;
-    uint32_t maximumSplice = expanding ? inputFrames : inputFrames - adjustmentFrames;
-    uint32_t center = (minimumSplice + maximumSplice) / 2;
-    uint32_t searchRadius = (uint32_t)renderer->sampleRate / 1000;
-    uint32_t availableRadius = (maximumSplice - minimumSplice) / 3;
-    if (searchRadius > availableRadius) {
-        searchRadius = availableRadius;
-    }
-    if (searchRadius < 1) {
-        searchRadius = 1;
-    }
-    uint32_t searchStart = center > searchRadius ? center - searchRadius : minimumSplice;
-    if (searchStart < minimumSplice) {
-        searchStart = minimumSplice;
-    }
-    uint32_t searchEnd = center + searchRadius;
-    if (searchEnd > maximumSplice) {
-        searchEnd = maximumSplice;
-    }
-
-    uint32_t bestSplice = center;
-    double bestScore = -2.0;
-    for (uint32_t splice = searchStart; splice <= searchEnd; splice++) {
-        uint32_t firstStart = splice - overlapFrames;
-        uint32_t secondStart = expanding ?
-                splice - adjustmentFrames - overlapFrames :
-                splice + adjustmentFrames - overlapFrames;
-        double score = normalizedCorrelation(renderer, input, firstStart, secondStart,
-                                             overlapFrames);
-        if (score > bestScore) {
-            bestScore = score;
-            bestSplice = splice;
-        }
-    }
-    return bestSplice;
-}
-
-#if defined(__aarch64__)
-static inline int16x4_t neonMixFour(int16x4_t first, int16x4_t second,
-                                   int32x4_t firstWeight, int32x4_t secondWeight,
-                                   float reciprocalDivisor) {
-    int32x4_t mixed = vmlaq_s32(vmulq_s32(vmovl_s16(first), firstWeight),
-                                vmovl_s16(second), secondWeight);
-    int32x4_t divided = vcvtq_s32_f32(
-            vmulq_n_f32(vcvtq_f32_s32(mixed), reciprocalDivisor));
-    return vmovn_s32(divided);
-}
-#endif
-
-static uint32_t overlapAdd(AAudioRenderer* renderer, const int16_t* input,
-                           uint32_t inputFrames, uint32_t overlapFrames,
-                           uint32_t adjustmentFrames, uint32_t spliceFrame,
-                           bool expanding) {
-    uint32_t outputFrames = expanding ? inputFrames + adjustmentFrames :
-                                        inputFrames - adjustmentFrames;
-    int16_t* output = renderer->stretchBuffer;
-    uint32_t prefixFrames = spliceFrame - overlapFrames;
-    memcpy(output, input,
-           (size_t)prefixFrames * renderer->channelCount * sizeof(int16_t));
-
-    uint32_t secondStartFrame = expanding ?
-            spliceFrame - adjustmentFrames - overlapFrames :
-            spliceFrame + adjustmentFrames - overlapFrames;
-    uint32_t frame = 0;
-    int32_t divisor = (int32_t)overlapFrames - 1;
-
-#if defined(__aarch64__)
-    // Stereo is the common path. Process four frames (eight samples) per iteration,
-    // duplicating each frame's crossfade weight across its left/right pair.
-    if (renderer->channelCount == 2) {
-        float reciprocalDivisor = 1.0f / divisor;
-        for (; frame + 4 <= overlapFrames; frame += 4) {
-            size_t firstOffset = (size_t)(spliceFrame - overlapFrames + frame) * 2;
-            size_t secondOffset = (size_t)(secondStartFrame + frame) * 2;
-            size_t outputOffset = (size_t)(prefixFrames + frame) * 2;
-            int32_t firstWeightsArray[4] = {
-                    divisor - (int32_t)frame,
-                    divisor - (int32_t)frame - 1,
-                    divisor - (int32_t)frame - 2,
-                    divisor - (int32_t)frame - 3,
-            };
-            int32_t secondWeightsArray[4] = {
-                    (int32_t)frame,
-                    (int32_t)frame + 1,
-                    (int32_t)frame + 2,
-                    (int32_t)frame + 3,
-            };
-            int32x4_t firstWeights = vld1q_s32(firstWeightsArray);
-            int32x4_t secondWeights = vld1q_s32(secondWeightsArray);
-            int32x4x2_t duplicatedFirst = vzipq_s32(firstWeights, firstWeights);
-            int32x4x2_t duplicatedSecond = vzipq_s32(secondWeights, secondWeights);
-            int16x8_t firstSamples = vld1q_s16(input + firstOffset);
-            int16x8_t secondSamples = vld1q_s16(input + secondOffset);
-            int16x8_t mixed = vcombine_s16(
-                    neonMixFour(vget_low_s16(firstSamples), vget_low_s16(secondSamples),
-                                duplicatedFirst.val[0], duplicatedSecond.val[0],
-                                reciprocalDivisor),
-                    neonMixFour(vget_high_s16(firstSamples), vget_high_s16(secondSamples),
-                                duplicatedFirst.val[1], duplicatedSecond.val[1],
-                                reciprocalDivisor));
-            vst1q_s16(output + outputOffset, mixed);
-        }
-    }
-#endif
-
-    for (; frame < overlapFrames; frame++) {
-        size_t firstOffset = (size_t)(spliceFrame - overlapFrames + frame) *
-                             renderer->channelCount;
-        size_t secondOffset = (size_t)(secondStartFrame + frame) * renderer->channelCount;
-        size_t outputOffset = (size_t)(prefixFrames + frame) * renderer->channelCount;
-        int32_t firstWeight = (int32_t)(overlapFrames - 1 - frame);
-        int32_t secondWeight = (int32_t)frame;
-        int32_t channel = 0;
-#if defined(__aarch64__)
-        float reciprocalDivisor = 1.0f / divisor;
-        int32x4_t firstWeightVector = vdupq_n_s32(firstWeight);
-        int32x4_t secondWeightVector = vdupq_n_s32(secondWeight);
-        for (; channel + 4 <= renderer->channelCount; channel += 4) {
-            int16x4_t mixed = neonMixFour(
-                    vld1_s16(input + firstOffset + channel),
-                    vld1_s16(input + secondOffset + channel),
-                    firstWeightVector, secondWeightVector, reciprocalDivisor);
-            vst1_s16(output + outputOffset + channel, mixed);
-        }
-#endif
-        for (; channel < renderer->channelCount; channel++) {
-            int32_t mixed = (input[firstOffset + channel] * firstWeight +
-                             input[secondOffset + channel] * secondWeight) / divisor;
-            output[outputOffset + channel] = (int16_t)mixed;
-        }
-    }
-
-    uint32_t suffixInputFrame = expanding ? spliceFrame - adjustmentFrames :
-                                            spliceFrame + adjustmentFrames;
-    uint32_t suffixFrames = inputFrames - suffixInputFrame;
-    memcpy(output + (size_t)spliceFrame * renderer->channelCount,
-           input + (size_t)suffixInputFrame * renderer->channelCount,
-           (size_t)suffixFrames * renderer->channelCount * sizeof(int16_t));
-    return outputFrames;
-}
-
-static uint32_t stretchFrames(AAudioRenderer* renderer, const int16_t* input,
-                              uint32_t inputFrames, int ratePpm, const int16_t** output) {
-    *output = input;
-    if (!renderer->adaptive || ratePpm == RATE_ONE_PPM || inputFrames == 0) {
-        return inputFrames;
-    }
-
-    if (ratePpm < RATE_MIN_PPM) {
-        ratePpm = RATE_MIN_PPM;
-    }
-    else if (ratePpm > RATE_MAX_PPM) {
-        ratePpm = RATE_MAX_PPM;
-    }
-    uint32_t outputFrames = (uint32_t)(((int64_t)inputFrames * RATE_ONE_PPM + ratePpm / 2) /
-                                       ratePpm);
-    if (outputFrames == inputFrames) {
-        return inputFrames;
-    }
-
-    uint32_t adjustmentFrames = outputFrames > inputFrames ? outputFrames - inputFrames :
-                                                               inputFrames - outputFrames;
-    uint32_t overlapFrames = (uint32_t)renderer->sampleRate / 1000;
-    uint32_t quarterPacket = inputFrames / 4;
-    if (overlapFrames < 8) {
-        overlapFrames = 8;
-    }
-    if (overlapFrames > quarterPacket) {
-        overlapFrames = quarterPacket;
-    }
-    if (overlapFrames < 2 || adjustmentFrames + overlapFrames >= inputFrames ||
-        outputFrames > renderer->stretchCapacityFrames) {
-        return inputFrames;
-    }
-
-    bool expanding = outputFrames > inputFrames;
-    uint32_t spliceFrame = findBestSplice(renderer, input, inputFrames, overlapFrames,
-                                          adjustmentFrames, expanding);
-    outputFrames = overlapAdd(renderer, input, inputFrames, overlapFrames, adjustmentFrames,
-                              spliceFrame, expanding);
-    *output = renderer->stretchBuffer;
-    atomic_fetch_add_explicit(&renderer->timeStretchFrameDelta,
-                              (long long)outputFrames - inputFrames,
-                              memory_order_relaxed);
-    return outputFrames;
-}
-
-static int updateAdaptiveController(AAudioRenderer* renderer, uint32_t packetFrames,
-                                    uint32_t queuedFrames) {
-    if (!renderer->adaptive) {
-        return RATE_ONE_PPM;
-    }
-
-    int64_t nowNs = monotonicTimeNs();
-    uint32_t targetFrames = atomic_load_explicit(&renderer->targetFrames, memory_order_relaxed);
-    uint32_t underruns = atomic_load_explicit(&renderer->underrunCallbacks, memory_order_relaxed);
-    if (underruns != renderer->observedUnderrunCallbacks) {
-        renderer->observedUnderrunCallbacks = underruns;
-        targetFrames = renderer->maxTargetFrames;
-        renderer->protectionUntilNs = nowNs + (int64_t)UNDERRUN_PROTECTION_MS * 1000000LL;
-        renderer->lastTargetDecreaseNs = nowNs;
-    }
-
-    if (renderer->lastArrivalNs >= 0 && renderer->previousPacketFrames > 0) {
-        double intervalMs = (nowNs - renderer->lastArrivalNs) / 1000000.0;
-        double expectedMs = renderer->previousPacketFrames * 1000.0 / renderer->sampleRate;
-        double deviationMs = fabs(intervalMs - expectedMs);
-        if (deviationMs > MAX_TARGET_MS) {
-            deviationMs = MAX_TARGET_MS;
-        }
-        renderer->jitterMs += (deviationMs - renderer->jitterMs) / 16.0;
-        uint32_t desiredMs = MIN_TARGET_MS + (uint32_t)ceil(renderer->jitterMs * 4.0);
-        if (desiredMs > MAX_TARGET_MS) {
-            desiredMs = MAX_TARGET_MS;
-        }
-        uint32_t desiredFrames = clampFrames(framesForMs(renderer, desiredMs),
-                                             renderer->minTargetFrames,
-                                             renderer->maxTargetFrames);
-        if (intervalMs > expectedMs + targetFrames * 1000.0 / renderer->sampleRate) {
-            desiredFrames = renderer->maxTargetFrames;
-            renderer->protectionUntilNs = nowNs +
-                    (int64_t)UNDERRUN_PROTECTION_MS * 1000000LL;
-        }
-        if (nowNs < renderer->protectionUntilNs && desiredFrames < targetFrames) {
-            desiredFrames = targetFrames;
-        }
-        if (desiredFrames >= targetFrames) {
-            targetFrames = desiredFrames;
-            renderer->lastTargetDecreaseNs = nowNs;
-        }
-        else if (renderer->lastTargetDecreaseNs < 0) {
-            renderer->lastTargetDecreaseNs = nowNs;
-        }
-        else {
-            int64_t steps = (nowNs - renderer->lastTargetDecreaseNs) /
-                    ((int64_t)TARGET_DECREASE_INTERVAL_MS * 1000000LL);
-            if (steps > 0) {
-                uint32_t decrease = framesForMs(renderer, (uint32_t)steps);
-                targetFrames = targetFrames > decrease ? targetFrames - decrease : desiredFrames;
-                if (targetFrames < desiredFrames) {
-                    targetFrames = desiredFrames;
-                }
-                renderer->lastTargetDecreaseNs += steps *
-                        (int64_t)TARGET_DECREASE_INTERVAL_MS * 1000000LL;
-            }
-        }
-        atomic_store_explicit(&renderer->targetFrames, targetFrames, memory_order_release);
-    }
-    else {
-        renderer->lastTargetDecreaseNs = nowNs;
-    }
-    renderer->lastArrivalNs = nowNs;
-    renderer->previousPacketFrames = packetFrames;
-    atomic_store_explicit(&renderer->jitterMicros,
-                          (int)llround(renderer->jitterMs * 1000.0),
-                          memory_order_relaxed);
-
-    int32_t errorFrames = (int32_t)queuedFrames - (int32_t)targetFrames;
-    uint32_t magnitudeFrames = (uint32_t)(errorFrames < 0 ? -errorFrames : errorFrames);
-    uint32_t deadbandFrames = framesForMs(renderer, 4);
-    int ratePpm = RATE_ONE_PPM;
-    if (magnitudeFrames > deadbandFrames) {
-        double magnitudeMs = magnitudeFrames * 1000.0 / renderer->sampleRate;
-        int adjustmentPpm = 10000 + (int)((magnitudeMs - 4.0) * 1000.0);
-        if (adjustmentPpm > 30000) {
-            adjustmentPpm = 30000;
-        }
-        ratePpm = errorFrames > 0 ? RATE_ONE_PPM + adjustmentPpm :
-                                    RATE_ONE_PPM - adjustmentPpm;
-    }
-    atomic_store_explicit(&renderer->playbackRatePpm, ratePpm, memory_order_relaxed);
-    return ratePpm;
-}
-
 static uint32_t writeFrames(AAudioRenderer* renderer, const int16_t* samples, uint32_t frames) {
     if (frames == 0 || atomic_load_explicit(&renderer->closing, memory_order_acquire)) {
         return 0;
@@ -1143,24 +883,17 @@ static uint32_t writeFrames(AAudioRenderer* renderer, const int16_t* samples, ui
     uint32_t readFrame = atomic_load_explicit(&renderer->readFrame, memory_order_acquire);
     uint32_t writeFrame = atomic_load_explicit(&renderer->writeFrame, memory_order_relaxed);
     uint32_t queuedFrames = writeFrame - readFrame;
-    bool primed = atomic_load_explicit(&renderer->primed, memory_order_acquire);
-    int playbackRatePpm = primed ?
-            updateAdaptiveController(renderer, frames, queuedFrames) : RATE_ONE_PPM;
-    if (!primed) {
-        atomic_store_explicit(&renderer->playbackRatePpm, RATE_ONE_PPM,
-                              memory_order_relaxed);
-    }
-    const int16_t* adjustedSamples = samples;
-    uint32_t adjustedFrames = stretchFrames(renderer, samples, frames, playbackRatePpm,
-                                            &adjustedSamples);
-    uint32_t queueLimitFrames = primed ?
-            renderer->steadyCapacityFrames : renderer->capacityFrames;
-    uint32_t freeFrames = queuedFrames < queueLimitFrames ?
-            queueLimitFrames - queuedFrames : 0;
-    uint32_t acceptedFrames = adjustedFrames < freeFrames ? adjustedFrames : freeFrames;
+    // PCM is queued bit-for-bit; only the consumer may discard/crossfade old audio.
+    bool startupComplete = atomic_load_explicit(&renderer->startupComplete, memory_order_acquire);
+    uint32_t adjustedFrames = frames;
+    uint32_t queueLimitFrames = startupComplete ?
+            atomic_load_explicit(&renderer->steadyCapacityFrames, memory_order_relaxed) :
+            renderer->capacityFrames;
+    uint32_t freeFrames = queuedFrames < queueLimitFrames ? queueLimitFrames - queuedFrames : 0;
+    uint32_t acceptedFrames = frames < freeFrames ? frames : freeFrames;
 
     if (acceptedFrames > 0) {
-        copyToRing(renderer, adjustedSamples, writeFrame, acceptedFrames);
+        copyToRing(renderer, samples, writeFrame, acceptedFrames);
         atomic_store_explicit(&renderer->writeFrame, writeFrame + acceptedFrames, memory_order_release);
     }
 
@@ -1243,8 +976,6 @@ static void destroyRenderer(AAudioRenderer* renderer) {
 
     free(renderer->ring);
     renderer->ring = NULL;
-    free(renderer->stretchBuffer);
-    renderer->stretchBuffer = NULL;
     free(renderer);
 }
 
@@ -1278,57 +1009,42 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
         fixedTargetMs = MAX_FIXED_TARGET_MS;
     }
     renderer->fixedTargetMs = (uint32_t)fixedTargetMs;
-    renderer->minTargetFrames = framesForMs(renderer,
-            renderer->adaptive ? MIN_TARGET_MS : (uint32_t)fixedTargetMs);
-    renderer->maxTargetFrames = framesForMs(renderer,
-            renderer->adaptive ? MAX_TARGET_MS : (uint32_t)fixedTargetMs);
+    AudioBufferPolicyInit(&renderer->bufferPolicy, (uint32_t)sampleRate,
+                          (uint32_t)samplesPerFrame);
     uint32_t initialTargetFrames = framesForMs(renderer,
-            renderer->adaptive ? INITIAL_TARGET_MS : (uint32_t)fixedTargetMs);
-    renderer->lastArrivalNs = -1;
-    renderer->lastTargetDecreaseNs = -1;
-    renderer->protectionUntilNs = -1;
-
-    // The ring owns jitter buffering. AAudio itself remains at a two-burst low-latency size.
-    // Keep 100 ms of non-blocking producer headroom beyond the selected target.
-    uint32_t headroomFrames = framesForMs(renderer, RING_HEADROOM_MS);
-    renderer->steadyCapacityFrames = renderer->maxTargetFrames + headroomFrames;
-    if (renderer->steadyCapacityFrames < (uint32_t)sampleRate / 10) {
-        renderer->steadyCapacityFrames = (uint32_t)sampleRate / 10;
-    }
+            renderer->adaptive ? AUDIO_BUFFER_INITIAL_MS : (uint32_t)fixedTargetMs);
+    uint32_t steadyCapacityFrames = renderer->adaptive ?
+            framesForMs(renderer, AUDIO_BUFFER_HARD_CAP_MS) + (uint32_t)samplesPerFrame :
+            framesForMs(renderer, (uint32_t)fixedTargetMs + RING_HEADROOM_MS);
     renderer->capacityFrames = framesForMs(renderer, STARTUP_CAPACITY_MS);
-    if (renderer->capacityFrames < renderer->steadyCapacityFrames) {
-        renderer->capacityFrames = renderer->steadyCapacityFrames;
-    }
-
+    if (renderer->capacityFrames < steadyCapacityFrames) renderer->capacityFrames = steadyCapacityFrames;
     renderer->ring = (int16_t*)calloc((size_t)renderer->capacityFrames * channelCount,
                                       sizeof(int16_t));
-    renderer->stretchCapacityFrames = (uint32_t)(((int64_t)samplesPerFrame * 100 + 96) / 97) + 8;
-    renderer->stretchBuffer = (int16_t*)calloc(
-            (size_t)renderer->stretchCapacityFrames * channelCount, sizeof(int16_t));
-    if (renderer->ring == NULL || renderer->stretchBuffer == NULL) {
-        // The atomic fields are initialized below, so don't route this early failure
-        // through destroyRenderer(), which deliberately performs atomic stores.
-        free(renderer->ring);
-        free(renderer->stretchBuffer);
+    if (renderer->ring == NULL) {
         free(renderer);
         return 0;
     }
-
+    atomic_init(&renderer->steadyCapacityFrames, steadyCapacityFrames);
+    atomic_init(&renderer->bufferSizeFrames, 0);
     atomic_init(&renderer->readFrame, 0);
     atomic_init(&renderer->writeFrame, 0);
     atomic_init(&renderer->targetFrames, initialTargetFrames);
     atomic_init(&renderer->armed, false);
     atomic_init(&renderer->started, false);
     atomic_init(&renderer->primed, false);
+    atomic_init(&renderer->startupComplete, false);
     atomic_init(&renderer->closing, false);
     atomic_init(&renderer->recoveryRequested, false);
     atomic_init(&renderer->recovering, false);
     atomic_init(&renderer->underrunCallbacks, 0);
     atomic_init(&renderer->underrunFrames, 0);
     atomic_init(&renderer->droppedFrames, 0);
-    atomic_init(&renderer->playbackRatePpm, RATE_ONE_PPM);
-    atomic_init(&renderer->jitterMicros, 0);
-    atomic_init(&renderer->timeStretchFrameDelta, 0);
+    atomic_init(&renderer->crossfadeDrops, 0);
+    atomic_init(&renderer->averageDepthFrames, 0);
+    atomic_init(&renderer->crossfadeDroppedFrames, 0);
+    atomic_init(&renderer->rebufferCount, 0);
+    atomic_init(&renderer->hardTrimCount, 0);
+    atomic_init(&renderer->hardwareBufferGrowthCount, 0);
     atomic_init(&renderer->lastError, AAUDIO_OK);
     atomic_init(&renderer->streamState, AAUDIO_STREAM_STATE_UNINITIALIZED);
     atomic_init(&renderer->armTimeNs, 0);
@@ -1346,7 +1062,6 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeCreate(
 
     if (pthread_mutex_init(&renderer->streamMutex, NULL) != 0) {
         free(renderer->ring);
-        free(renderer->stretchBuffer);
         free(renderer);
         return 0;
     }
@@ -1467,9 +1182,9 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeGetStats(
             (jlong)xRunCount,
             (jlong)atomic_load_explicit(&renderer->lastError, memory_order_acquire),
             (jlong)atomic_load_explicit(&renderer->targetFrames, memory_order_acquire),
-            (jlong)atomic_load_explicit(&renderer->playbackRatePpm, memory_order_relaxed),
-            (jlong)atomic_load_explicit(&renderer->jitterMicros, memory_order_relaxed),
-            (jlong)atomic_load_explicit(&renderer->timeStretchFrameDelta, memory_order_relaxed),
+            (jlong)atomic_load_explicit(&renderer->crossfadeDrops, memory_order_relaxed),
+            (jlong)atomic_load_explicit(&renderer->averageDepthFrames, memory_order_relaxed),
+            (jlong)atomic_load_explicit(&renderer->crossfadeDroppedFrames, memory_order_relaxed),
             (jlong)atomic_load_explicit(&renderer->started, memory_order_acquire),
             (jlong)atomic_load_explicit(&renderer->callbackCount, memory_order_relaxed),
             (jlong)atomic_load_explicit(&renderer->diagnosticEventsDropped,
@@ -1483,6 +1198,9 @@ Java_com_limelight_binding_audio_AndroidAudioRenderer_nativeGetStats(
             (jlong)streamState,
             (jlong)atomic_load_explicit(&renderer->armed, memory_order_acquire),
             (jlong)atomic_load_explicit(&renderer->primed, memory_order_acquire),
+            (jlong)atomic_load_explicit(&renderer->rebufferCount, memory_order_relaxed),
+            (jlong)atomic_load_explicit(&renderer->hardTrimCount, memory_order_relaxed),
+            (jlong)atomic_load_explicit(&renderer->hardwareBufferGrowthCount, memory_order_relaxed),
     };
     (*env)->SetLongArrayRegion(env, stats, 0, NATIVE_STATS_COUNT, values);
 }

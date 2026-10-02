@@ -6,6 +6,10 @@ import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
+
+import com.limelight.R;
+import java.util.Locale;
 
 import androidx.preference.PreferenceManager;
 import androidx.test.core.app.ApplicationProvider;
@@ -18,6 +22,27 @@ import org.robolectric.annotation.Config;
 @Config(sdk = {33})
 @RunWith(RobolectricTestRunner.class)
 public class AudioDiagnosticsPreferenceTest {
+    @Test
+    public void savedAdaptiveToggleNowNamesCrossfadeCorrection() {
+        Context context = ApplicationProvider.getApplicationContext();
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        preferences.edit().clear()
+                .putBoolean("checkbox_enable_callback_audio_buffer", true)
+                .putBoolean("checkbox_enable_adaptive_audio_buffer", true)
+                .commit();
+        assertTrue(PreferenceConfiguration.isAdaptiveAudioBufferEnabled(preferences));
+
+        Configuration japanese = new Configuration(context.getResources().getConfiguration());
+        japanese.setLocale(Locale.JAPANESE);
+        Context localized = context.createConfigurationContext(japanese);
+        assertEquals("適応音声バッファ（クロスフェード補正）",
+                localized.getString(R.string.title_checkbox_enable_adaptive_audio_buffer));
+        String summary = localized.getString(R.string.summary_checkbox_enable_adaptive_audio_buffer);
+        assertTrue(summary.contains("音声速度を変えず"));
+        assertTrue(summary.contains("再蓄積"));
+        assertFalse(summary.contains("WSOLA"));
+    }
+
     @Test
     public void audioDiagnosticsAreOptInAndReadFromSettings() {
         Context context = ApplicationProvider.getApplicationContext();

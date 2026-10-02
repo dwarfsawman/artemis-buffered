@@ -1,0 +1,91 @@
+{
+  "local_commit": "2b5f7f296aacb59679942a84babd3c06e41fdcb5",
+  "punktfunk_commit": "d016f73683b6b96ca64da99679ca5f4005846726",
+  "java_reference_sha256": "9973d834b2d1c2e2959719c7f720b2c6718b7d75af104e5dba08ffabfa721048",
+  "upstream_audio_sha256": {
+    "jitter.rs": "0eee154cae2e9cabe6c3ab722b88587e427f8400bb6b13b5831319b58ce664c8",
+    "sync.rs": "f0690c83a7eaf897b639a2dde2eb27518b6679901f0e54ff08f4fddecd7eb8d4",
+    "recovery.rs": "b9d4e73491d9a84d1bd5e0d0b551fbc08a8c8afddfedf6c06c9851acf7d7ae42",
+    "mod.rs": "087613e8c3683ac1ad9826588dbd2bd014e576371889d6607ef6787b48b30e23",
+    "pcm.rs": "9f348ce657b235fadfce8788ac7cde5492e217f9b9182388f28aae697fb964c7"
+  },
+  "scope": "Java reference model tone probe and isolated, unmodified Rust audio policy tests; not Android runtime validation",
+  "tone_probe": {
+    "0.97": {
+      "output_packet_frames": 247,
+      "output_duration_ms": 5.145833333333333,
+      "largest_spectral_line_hz": 2914.98,
+      "power_outside_largest_line_percent": 43.3272,
+      "minimum_1ms_rms_vs_input_db": -4.467,
+      "top_spectral_lines": [
+        {
+          "hz": 2914.98,
+          "percent_total_power": 56.6728
+        },
+        {
+          "hz": 3109.312,
+          "percent_total_power": 33.7484
+        },
+        {
+          "hz": 2720.648,
+          "percent_total_power": 4.1884
+        },
+        {
+          "hz": 3303.644,
+          "percent_total_power": 3.3744
+        }
+      ]
+    },
+    "1.0": {
+      "output_packet_frames": 240,
+      "output_duration_ms": 5.0,
+      "largest_spectral_line_hz": 3000.0,
+      "power_outside_largest_line_percent": 0.0,
+      "minimum_1ms_rms_vs_input_db": 0.0,
+      "top_spectral_lines": [
+        {
+          "hz": 3000.0,
+          "percent_total_power": 100.0
+        },
+        {
+          "hz": 9000.0,
+          "percent_total_power": 0.0
+        },
+        {
+          "hz": 21000.0,
+          "percent_total_power": 0.0
+        },
+        {
+          "hz": 15000.0,
+          "percent_total_power": 0.0
+        }
+      ]
+    },
+    "1.03": {
+      "output_packet_frames": 233,
+      "output_duration_ms": 4.854166666666667,
+      "largest_spectral_line_hz": 3090.129,
+      "power_outside_largest_line_percent": 43.0559,
+      "minimum_1ms_rms_vs_input_db": -4.497,
+      "top_spectral_lines": [
+        {
+          "hz": 3090.129,
+          "percent_total_power": 56.9441
+        },
+        {
+          "hz": 2884.12,
+          "percent_total_power": 33.9165
+        },
+        {
+          "hz": 3296.137,
+          "percent_total_power": 4.0807
+        },
+        {
+          "hz": 2678.112,
+          "percent_total_power": 3.2859
+        }
+      ]
+    }
+  },
+  "punktfunk_tests": "test result: ok. 68 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+}

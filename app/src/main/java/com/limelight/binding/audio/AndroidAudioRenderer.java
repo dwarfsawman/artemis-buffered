@@ -19,7 +19,7 @@ import com.limelight.preferences.PreferenceConfiguration;
 
 public class AndroidAudioRenderer implements AudioRenderer {
     private static final long STATS_LOG_INTERVAL_MS = 2000;
-    private static final int NATIVE_STATS_COUNT = 21;
+    private static final int NATIVE_STATS_COUNT = 24;
     private static final int NATIVE_DIAGNOSTIC_EVENT_WORDS = 9;
     private static final int NATIVE_DIAGNOSTIC_EVENT_CAPACITY = 128;
 
@@ -33,6 +33,8 @@ public class AndroidAudioRenderer implements AudioRenderer {
     private static final int NATIVE_EVENT_STREAM_ERROR = 8;
     private static final int NATIVE_EVENT_DELIVERY_GAP = 9;
     private static final int NATIVE_EVENT_PRIMED = 10;
+    private static final int NATIVE_EVENT_REBUFFERING = 11;
+    private static final int NATIVE_EVENT_CROSSFADE_DROP = 12;
 
     static {
         System.loadLibrary("moonlight-core");
@@ -160,7 +162,7 @@ public class AndroidAudioRenderer implements AudioRenderer {
                 "selectedBufferMode", getSelectedBufferMode(),
                 "aaudioEligible", callbackAudioBuffer &&
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && !enableAudioFx,
-                "underrunRebuffering", false);
+                "underrunRebuffering", adaptiveAudioBuffer);
 
         // AAudio uses a high-priority callback to consume a separate PCM jitter ring.
         // Audio effects require an AudioTrack session, so preserve the legacy path for that case.
@@ -172,22 +174,22 @@ public class AndroidAudioRenderer implements AudioRenderer {
                     diagnostics != null);
             if (nativeRenderer != 0) {
                 int initialTargetMs = adaptiveAudioBuffer ? 40 : fixedAudioBufferMs;
-                int minimumTargetMs = adaptiveAudioBuffer ? 20 : fixedAudioBufferMs;
-                int maximumTargetMs = adaptiveAudioBuffer ? 80 : fixedAudioBufferMs;
+                int minimumTargetMs = adaptiveAudioBuffer ? 25 : fixedAudioBufferMs;
+                int maximumTargetMs = adaptiveAudioBuffer ? 90 : fixedAudioBufferMs;
                 LimeLog.info(adaptiveAudioBuffer ?
-                        "Using adaptive callback AAudio renderer: 20-80 ms target, " +
-                                "initial=40 ms, WSOLA rate=0.97-1.03, no underrun rebuffering" :
+                        "Using adaptive crossfade AAudio renderer: base=25 ms, initial=40 ms, " +
+                                "max target=90 ms, conditional rebuffering" :
                         "Using fixed callback AAudio renderer: " + fixedAudioBufferMs +
                                 " ms SPSC ring, " +
-                                "no WSOLA, no underrun rebuffering");
+                                "no speed adjustment, no underrun rebuffering");
                 recordDiagnostic("renderer_started",
                         "renderer", "AAudio",
                         "bufferMode", getSelectedBufferMode(),
                         "nativePcmPath", true,
                         "adaptive", adaptiveAudioBuffer,
-                        "wsolaEnabled", adaptiveAudioBuffer,
+                        "crossfadeCorrectionEnabled", adaptiveAudioBuffer,
                         "startupWarmup", true,
-                        "underrunRebuffering", false,
+                        "underrunRebuffering", adaptiveAudioBuffer,
                         "initialTargetMs", initialTargetMs,
                         "minimumTargetMs", minimumTargetMs,
                         "maximumTargetMs", maximumTargetMs);
@@ -283,7 +285,7 @@ public class AndroidAudioRenderer implements AudioRenderer {
         if (!callbackAudioBuffer) {
             return "legacy_audio_track";
         }
-        return adaptiveAudioBuffer ? "adaptive_20_80ms_wsola" :
+        return adaptiveAudioBuffer ? "adaptive_crossfade" :
                 "fixed_" + fixedAudioBufferMs + "ms";
     }
 
@@ -350,18 +352,20 @@ public class AndroidAudioRenderer implements AudioRenderer {
         long droppedMs = sampleRate == 0 ? 0 : nativeStats[3] * 1000 / sampleRate;
         long targetMs = sampleRate == 0 ? 40 : nativeStats[6] * 1000 / sampleRate;
         long ringCapacityMs = sampleRate == 0 ? 0 : nativeStats[14] * 1000 / sampleRate;
-        double playbackRate = nativeStats[7] / 1_000_000.0;
-        double jitterMs = nativeStats[8] / 1_000.0;
+        long averageDepthMs = sampleRate == 0 ? 0 : nativeStats[8] * 1000 / sampleRate;
         double maximumCallbackGapMs = nativeStats[13] / 1_000.0;
         recordDiagnostic("aaudio_stats",
                 "queuedMs", queuedMs,
                 "targetMs", targetMs,
-                "playbackRate", playbackRate,
-                "jitterMs", jitterMs,
+                "averageDepthMs", averageDepthMs,
+                "crossfadeDrops", nativeStats[7],
                 "underrunCallbacks", nativeStats[1],
                 "underrunMs", underrunMs,
                 "droppedMs", droppedMs,
-                "stretchDeltaFrames", nativeStats[9],
+                "crossfadeDroppedFrames", nativeStats[9],
+                "rebufferCount", nativeStats[21],
+                "hardTrimCount", nativeStats[22],
+                "hardwareBufferGrowthCount", nativeStats[23],
                 "xrunCount", nativeStats[4],
                 "lastError", nativeStats[5],
                 "started", nativeStats[10] != 0,
@@ -377,12 +381,15 @@ public class AndroidAudioRenderer implements AudioRenderer {
                 "primed", nativeStats[20] != 0);
         LimeLog.info("AAudio jitter stats: queued=" + queuedMs +
                 " ms, target=" + targetMs +
-                " ms, rate=" + String.format("%.3f", playbackRate) +
-                ", jitter=" + String.format("%.2f", jitterMs) +
+                " ms, averageDepth=" + averageDepthMs +
                 " ms, underrunCallbacks=" + nativeStats[1] +
                 ", underrun=" + underrunMs +
                 " ms, dropped=" + droppedMs +
-                " ms, stretchDeltaFrames=" + nativeStats[9] +
+                " ms, crossfadeDrops=" + nativeStats[7] +
+                ", crossfadeDroppedFrames=" + nativeStats[9] +
+                ", rebufferCount=" + nativeStats[21] +
+                ", hardTrimCount=" + nativeStats[22] +
+                ", hardwareBufferGrowthCount=" + nativeStats[23] +
                 ", maxCallbackGap=" + String.format("%.2f", maximumCallbackGapMs) +
                 " ms, streamState=" + nativeStats[18] +
                 ", primed=" + (nativeStats[20] != 0) +
@@ -589,6 +596,17 @@ public class AndroidAudioRenderer implements AudioRenderer {
                         "callbackNumber", value4,
                         "callbackGapUs", value5,
                         "startupCapacityFrames", value6);
+                break;
+            case NATIVE_EVENT_REBUFFERING:
+                diagnostics.recordAtElapsedRealtimeNanos("aaudio_rebuffering", elapsedRealtimeNanos,
+                        "availableFrames", value0, "requestedFrames", value1,
+                        "targetFrames", value2, "rebufferCount", value3);
+                break;
+            case NATIVE_EVENT_CROSSFADE_DROP:
+                diagnostics.recordAtElapsedRealtimeNanos("aaudio_crossfade_drop", elapsedRealtimeNanos,
+                        "droppedFrames", value0, "fadeFrames", value1,
+                        "remainingFrames", value2, "targetFrames", value3,
+                        "hardTrim", value4 != 0, "requestedFrames", value5);
                 break;
             default:
                 diagnostics.recordAtElapsedRealtimeNanos("aaudio_unknown_event",

@@ -221,8 +221,8 @@
     <string name="summary_checkbox_enable_callback_audio_buffer">オフ（既定）：このリポジトリのクローン時と同じAudioTrack動作。オン：Android 8.1以降でAAudioコールバック＋SPSCリングを使用し、下に固定バッファ量を表示します。音声エフェクト有効時はAudioTrackを使用します。</string>
     <string name="title_seekbar_fixed_audio_buffer_ms">固定音声バッファ量（ms）</string>
     <string name="summary_seekbar_fixed_audio_buffer_ms">40～120 msを10 ms刻みで選択します。大きくすると音声の途切れに強くなる一方、音声遅延が増えます。適応モードがオフのときだけ使用されます。</string>
-    <string name="title_checkbox_enable_adaptive_audio_buffer">適応20～80 ms＋WSOLA型処理</string>
-    <string name="summary_checkbox_enable_adaptive_audio_buffer">上のコールバック音声バッファを有効にすると設定できます。オフ：スライダーで選んだ固定バッファ、WSOLAなし。オン：適応20～80 ms＋WSOLA型の時間伸縮。どちらもアンダーラン後の再バッファリングは行いません。</string>
+    <string name="title_checkbox_enable_adaptive_audio_buffer">適応音声バッファ（クロスフェード補正）</string>
+    <string name="summary_checkbox_enable_adaptive_audio_buffer">上のコールバック音声バッファを有効にすると設定できます。オン：通常は音声速度を変えずに再生し、音切れに応じてバッファ量を調整します。長く溜まった音声は短いクロスフェードで補正し、音声不足が続く場合は再蓄積します。オフ：指定した固定バッファ量を使います。</string>
     <string name="title_share_audio_diagnostic_logs">音声診断ログを共有</string>
     <string name="summary_share_audio_diagnostic_logs">最近の音声セッションログを分析用のZIPファイルとして書き出します</string>
     <string name="toast_no_audio_diagnostic_logs">音声診断ログはまだ記録されていません</string>
