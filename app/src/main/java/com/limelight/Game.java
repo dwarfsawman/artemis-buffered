@@ -12,6 +12,7 @@ import com.limelight.binding.PlatformBinding;
 import com.limelight.binding.audio.AndroidAudioRenderer;
 import com.limelight.binding.audio.AudioDiagnosticsLogger;
 import com.limelight.binding.input.ControllerHandler;
+import com.limelight.binding.input.ExternalStylusSupport;
 import com.limelight.binding.input.GameInputDevice;
 import com.limelight.binding.input.KeyboardTranslator;
 import com.limelight.binding.input.capture.InputCaptureManager;
@@ -195,6 +196,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private float desiredRefreshRate;
 
     private InputCaptureProvider inputCaptureProvider;
+    private boolean activityResumed;
+    private MotionEvent earlyAccessibilityPointerEvent;
     private int modifierFlags = 0;
     private boolean grabbedInput = true;
     private boolean cursorVisible = false;
@@ -1307,6 +1310,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // With Android native pointer capture, capture is lost when focus is lost,
         // so it must be requested again when focus is regained.
         inputCaptureProvider.onWindowFocusChanged(hasFocus);
+        KeyboardAccessibilityService.refreshPointerInput();
     }
 
     private boolean isRefreshRateEqualMatch(float refreshRate) {
@@ -1604,6 +1608,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         super.onDestroy();
 
         instance = null;
+        KeyboardAccessibilityService.refreshPointerInput();
 
         if (prefConfig.enableFullExDisplay) handleDisplayRemoved();
 
@@ -1643,6 +1648,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     protected void onPause() {
+        activityResumed = false;
+        KeyboardAccessibilityService.refreshPointerInput();
         if (isFinishing()) {
             // Stop any further input device notifications before we lose focus (and pointer capture)
             if (controllerHandler != null) {
@@ -1654,6 +1661,51 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        activityResumed = true;
+        KeyboardAccessibilityService.refreshPointerInput();
+    }
+
+    public boolean canReceiveAccessibilityPointerEvents() {
+        return connected && activityResumed && streamView != null
+                && getWindow().getDecorView().hasWindowFocus()
+                && streamView.getDisplay() != null
+                && streamView.getDisplay().getDisplayId() == Display.DEFAULT_DISPLAY;
+    }
+
+    public void dispatchAccessibilityPointerEvent(MotionEvent event) {
+        if (!canReceiveAccessibilityPointerEvents()) return;
+        // Keep the untouched pre-reinjection event for pen direction while normal
+        // Activity/View dispatch handles hit testing, stream coordinates and menus.
+        // This is in-process dispatch; the event is never reinjected into Android.
+        MotionEvent previousEvent = earlyAccessibilityPointerEvent;
+        MotionEvent routedEvent = MotionEvent.obtain(event);
+        earlyAccessibilityPointerEvent = event;
+        try {
+            int[] location = new int[2];
+            getWindow().getDecorView().getLocationOnScreen(location);
+            routedEvent.offsetLocation(-location[0], -location[1]);
+            switch (routedEvent.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_MOVE:
+                case MotionEvent.ACTION_CANCEL:
+                case MotionEvent.ACTION_POINTER_DOWN:
+                case MotionEvent.ACTION_POINTER_UP:
+                    dispatchTouchEvent(routedEvent);
+                    break;
+                default:
+                    dispatchGenericMotionEvent(routedEvent);
+                    break;
+            }
+        } finally {
+            earlyAccessibilityPointerEvent = previousEvent;
+            routedEvent.recycle();
+        }
     }
 
     @Override
@@ -2465,11 +2517,26 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
     }
 
-    private static short getRotationDegrees(MotionEvent event, int pointerIndex) {
+    private short getRotationDegrees(View view, MotionEvent event, int pointerIndex) {
         InputDevice dev = event.getDevice();
         if (dev != null) {
             if (dev.getMotionRange(MotionEvent.AXIS_ORIENTATION, event.getSource()) != null) {
-                short rotationDegrees = (short) Math.toDegrees(event.getOrientation(pointerIndex));
+                Display display = view.getDisplay();
+                float orientation;
+                int earlyIndex = -1;
+                if (earlyAccessibilityPointerEvent != null
+                        && earlyAccessibilityPointerEvent.getDeviceId() == event.getDeviceId()) {
+                    earlyIndex = earlyAccessibilityPointerEvent.findPointerIndex(event.getPointerId(pointerIndex));
+                }
+                if (earlyIndex >= 0) {
+                    orientation = ExternalStylusSupport.getOrientationBeforeReinjection(
+                            earlyAccessibilityPointerEvent, earlyIndex, dev.getSources(),
+                            display == null ? 0 : display.getRotation());
+                } else {
+                    orientation = ExternalStylusSupport.getOrientation(event, pointerIndex,
+                            dev.getSources(), display == null ? 0 : display.getRotation());
+                }
+                short rotationDegrees = (short) Math.toDegrees(orientation);
                 if (rotationDegrees < 0) {
                     rotationDegrees += 360;
                 }
@@ -2557,7 +2624,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 normalizedCoords[0], normalizedCoords[1],
                 getPressureOrDistance(event, pointerIndex),
                 normalizedContactArea[0], normalizedContactArea[1],
-                getRotationDegrees(event, pointerIndex), tiltDegrees) != MoonBridge.LI_ERR_UNSUPPORTED;
+                getRotationDegrees(view, event, pointerIndex), tiltDegrees) != MoonBridge.LI_ERR_UNSUPPORTED;
     }
 
     private static byte convertToolTypeToStylusToolType(MotionEvent event, int pointerIndex) {
@@ -2622,7 +2689,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 normalizedCoords[0], normalizedCoords[1],
                 getPressureOrDistance(event, pointerIndex),
                 normalizedContactArea[0], normalizedContactArea[1],
-                getRotationDegrees(event, pointerIndex)) != MoonBridge.LI_ERR_UNSUPPORTED;
+                getRotationDegrees(view, event, pointerIndex)) != MoonBridge.LI_ERR_UNSUPPORTED;
     }
 
     private boolean trySendTouchEvent(View view, MotionEvent event) {
@@ -3375,6 +3442,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         cancelStreamInactivityTimeout();
         if (connecting || connected) {
             connecting = connected = false;
+            KeyboardAccessibilityService.refreshPointerInput();
             updatePipAutoEnter();
 
             // Release the local audio route synchronously. Network teardown remains asynchronous,
@@ -3620,6 +3688,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
                 connected = true;
                 connecting = false;
+                KeyboardAccessibilityService.refreshPointerInput();
                 updatePipAutoEnter();
 
                 // Hide the mouse cursor now after a short delay.
