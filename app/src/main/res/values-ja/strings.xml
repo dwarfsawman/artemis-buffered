@@ -229,4 +229,9 @@
     <string name="toast_audio_diagnostics_export_failed">音声診断ログを書き出せませんでした</string>
     <string name="audio_diagnostics_chooser_title">音声診断ログを共有</string>
     <string name="audio_diagnostics_share_subject">Artemis Buffered 音声診断ログ</string>
+    <string name="resolution_add">解像度を追加</string>
+    <string name="resolution_delete">追加した解像度を削除</string>
+    <string name="resolution_save">保存</string>
+    <string name="resolution_invalid">幅x高さを1〜9999で入力してください（例：2560x1600）</string>
+    <string name="resolution_none">削除できる解像度はありません</string>
 </resources>

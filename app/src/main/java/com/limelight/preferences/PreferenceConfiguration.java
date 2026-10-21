@@ -413,6 +413,9 @@ public class PreferenceConfiguration {
         else if (width == 2560 && height == 1440) {
             return false;
         }
+        else if (width == 2560 && height == 1600) {
+            return false;
+        }
         else if (width == 3840 && height == 2160) {
             return false;
         }

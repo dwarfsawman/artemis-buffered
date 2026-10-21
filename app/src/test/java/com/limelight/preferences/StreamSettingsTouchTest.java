@@ -48,6 +48,44 @@ public class StreamSettingsTouchTest {
     }
 
     @Test
+    public void resolutionDialogAddsSelectsAndDeletesSavedResolution() {
+        StreamSettings.SettingsFragment fragment = (StreamSettings.SettingsFragment)
+                activity.getSupportFragmentManager().getFragments().get(0);
+        androidx.preference.ListPreference preference = fragment.findPreference(
+                PreferenceConfiguration.RESOLUTION_PREF_STRING);
+        org.junit.Assert.assertNull(fragment.findPreference(
+                PreferenceConfiguration.CUSTOM_RESOLUTION_PREF_STRING));
+        fragment.onDisplayPreferenceDialog(preference);
+        androidx.appcompat.app.AlertDialog chooser = (androidx.appcompat.app.AlertDialog)
+                org.robolectric.shadows.ShadowDialog.getLatestDialog();
+        chooser.getButton(-1).performClick();
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+        androidx.appcompat.app.AlertDialog editor = (androidx.appcompat.app.AlertDialog)
+                org.robolectric.shadows.ShadowDialog.getLatestDialog();
+        android.view.ViewGroup panel = editor.findViewById(androidx.appcompat.R.id.custom);
+        EditText input = (EditText) panel.getChildAt(0);
+        input.setText("2304x1440");
+        editor.getButton(-1).performClick();
+        org.junit.Assert.assertEquals("2304x1440", preference.getValue());
+        assertTrue(preference.findIndexOfValue("2304x1440") >= 0);
+        assertTrue(SavedResolutions.load(PreferenceManager.getDefaultSharedPreferences(activity))
+                .contains("2304x1440"));
+        fragment.onDisplayPreferenceDialog(preference);
+        chooser = (androidx.appcompat.app.AlertDialog)
+                org.robolectric.shadows.ShadowDialog.getLatestDialog();
+        chooser.getButton(-3).performClick();
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
+        androidx.appcompat.app.AlertDialog delete = (androidx.appcompat.app.AlertDialog)
+                org.robolectric.shadows.ShadowDialog.getLatestDialog();
+        delete.getListView().performItemClick(null, 0, 0);
+        assertFalse(SavedResolutions.load(PreferenceManager.getDefaultSharedPreferences(activity))
+                .contains("2304x1440"));
+        org.junit.Assert.assertEquals(PreferenceConfiguration.DEFAULT_RESOLUTION, preference.getValue());
+        org.junit.Assert.assertEquals(-1, preference.findIndexOfValue("2304x1440"));
+        delete.dismiss();
+    }
+
+    @Test
     public void touchingOutsideCarouselClearsPresetNameFocus() {
         TouchHarness harness = createTouchHarness();
 

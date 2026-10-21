@@ -747,4 +747,9 @@
     <string name="profile_manager_active_profile">Active profile: %s</string>
     <string name="rename">Rename</string>
     <string name="save">Save</string>
+    <string name="resolution_add">Add resolution</string>
+    <string name="resolution_delete">Delete saved resolution</string>
+    <string name="resolution_save">Save</string>
+    <string name="resolution_invalid">Enter width x height (1–9999), e.g. 2560x1600</string>
+    <string name="resolution_none">No saved resolutions to delete</string>
 </resources>

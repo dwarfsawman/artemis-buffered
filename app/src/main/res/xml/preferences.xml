@@ -199,15 +199,6 @@
             app:iconSpaceReserved="false" />
 
         <EditTextPreference
-            android:defaultValue="1920x1080"
-            android:dialogTitle="@string/dialog_custom_resolution"
-            android:key="edit_diy_w_h"
-            android:singleLine="true"
-            android:summary="@string/summary_custom_resolution"
-            android:title="@string/title_custom_resolution"
-            app:iconSpaceReserved="false" />
-
-        <EditTextPreference
             android:key="edit_diy_bitrate"
             android:defaultValue="20"
             android:dialogMessage="@string/dialog_manual_enter_bitrate"

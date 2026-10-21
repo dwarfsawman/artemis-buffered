@@ -588,19 +588,14 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
                 category_gamepad_settings.removePreference(findPreference("seekbar_vibrate_fallback_strength"));
             }
 
-            // Check custom resolution
-            String customResStr = prevPrefConfig.customResolution;
-            if(customResStr != null && !customResStr.isEmpty()){
-                String[] resolutionSegments = customResStr.split("x");
-                if(resolutionSegments.length == 2){
-                    try {
-                        addNativeResolutionEntries(Integer.parseInt(resolutionSegments[0]), Integer.parseInt(resolutionSegments[1]), false, true);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
+            // The library is global; the selected resolution belongs to the current settings/profile.
+            for (String value : SavedResolutions.load(resolutionLibrary())) {
+                ListPreference resolution = findPreference(PreferenceConfiguration.RESOLUTION_PREF_STRING);
+                if (resolution.findIndexOfValue(value) < 0) {
+                    appendPreferenceEntry(resolution, value, value);
                 }
             }
-            
+
             // Check custom refresh rate
             String customRefreshRateStr = prevPrefConfig.customRefreshRate;
             if (customRefreshRateStr != null && !customRefreshRateStr.isEmpty()) {
@@ -828,6 +823,14 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
                     hdrPref.setChecked(false);
                     hdrPref.setSummary("Update the firmware on your NVIDIA SHIELD Android TV to enable HDR");
                 }
+            }
+
+            // Preserve resolutions selected by older or imported presets as selectable entries.
+            ListPreference resolutionPreference = findPreference(PreferenceConfiguration.RESOLUTION_PREF_STRING);
+            String selectedResolution = resolutionPreference.getValue();
+            if (SavedResolutions.normalize(selectedResolution) != null &&
+                    resolutionPreference.findIndexOfValue(selectedResolution) < 0) {
+                appendPreferenceEntry(resolutionPreference, selectedResolution, selectedResolution);
             }
 
             // Add a listener to the FPS and resolution preference
@@ -1077,47 +1080,6 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
                 });
             }
 
-            EditTextPreference resolutionEditPref = findPreference(PreferenceConfiguration.CUSTOM_RESOLUTION_PREF_STRING);
-            if (resolutionEditPref != null) {
-                resolutionEditPref.setOnBindEditTextListener((EditText editText) -> {
-                    editText.setInputType(InputType.TYPE_CLASS_TEXT);
-                    editText.setFilters(new InputFilter[]{new InputFilter.LengthFilter(11)});
-                });
-
-                resolutionEditPref.setOnPreferenceChangeListener((preference, newValue) -> {
-                    String value = (String) newValue;
-                    if (TextUtils.isEmpty(value)) {
-                        Toast.makeText(getActivity(), getString(R.string.pref_enter_value_0_9999), Toast.LENGTH_SHORT).show();
-                        return false;
-                    }
-
-                    // Verify format: [width]x[height]
-                    String[] resolutionSegments = value.split("x");
-                    if (resolutionSegments.length != 2) {
-                        Toast.makeText(getActivity(), getString(R.string.pref_error_occurred), Toast.LENGTH_SHORT).show();
-                        return false;
-                    }
-
-                    try {
-                        int width = Integer.parseInt(resolutionSegments[0]);
-                        int height = Integer.parseInt(resolutionSegments[1]);
-                        
-                        if (width <= 0 || height <= 0) {
-                            Toast.makeText(getActivity(), getString(R.string.pref_error_occurred), Toast.LENGTH_SHORT).show();
-                            return false;
-                        }
-
-                        // Save the value and reload settings
-                        editAndReload(PreferenceConfiguration.CUSTOM_RESOLUTION_PREF_STRING, value);
-
-                        return true;
-                    } catch (NumberFormatException e) {
-                        Toast.makeText(getActivity(), getString(R.string.pref_error_occurred), Toast.LENGTH_SHORT).show();
-                        return false;
-                    }
-                });
-            }
-
             EditTextPreference customRefreshRatePref = findPreference(PreferenceConfiguration.CUSTOM_REFRESH_RATE_PREF_STRING);
             if (customRefreshRatePref != null) {
                 customRefreshRatePref.setOnBindEditTextListener((EditText editText) -> {
@@ -1252,9 +1214,85 @@ public class StreamSettings extends AppCompatActivity implements SearchPreferenc
             }
         }
 
+        private SharedPreferences resolutionLibrary() {
+            return PreferenceManager.getDefaultSharedPreferences(requireContext());
+        }
+
+        private void selectResolution(ListPreference preference, String value) {
+            if (preference.callChangeListener(value)) {
+                preference.setValue(value);
+            }
+        }
+
+        private void showResolutionDialog(ListPreference preference) {
+            new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                    .setTitle(preference.getTitle())
+                    .setSingleChoiceItems(preference.getEntries(),
+                            preference.findIndexOfValue(preference.getValue()), (dialog, which) -> {
+                                selectResolution(preference, preference.getEntryValues()[which].toString());
+                                dialog.dismiss();
+                            })
+                    .setPositiveButton(R.string.resolution_add, (dialog, which) -> addResolution(preference))
+                    .setNeutralButton(R.string.resolution_delete, (dialog, which) -> deleteResolution(preference))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        }
+
+        private void addResolution(ListPreference preference) {
+            EditText input = new EditText(requireContext());
+            input.setSingleLine(true);
+            input.setHint("2560x1600");
+            input.setInputType(InputType.TYPE_CLASS_TEXT);
+            input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(32)});
+            androidx.appcompat.app.AlertDialog dialog = new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                    .setTitle(R.string.resolution_add).setView(input)
+                    .setPositiveButton(R.string.resolution_save, null)
+                    .setNegativeButton(android.R.string.cancel, null).create();
+            dialog.setOnShowListener(ignored -> dialog.getButton(-1).setOnClickListener(view -> {
+                String value = SavedResolutions.normalize(input.getText().toString());
+                if (value == null) {
+                    input.setError(getString(R.string.resolution_invalid));
+                    return;
+                }
+                if (preference.findIndexOfValue(value) < 0) {
+                    Set<String> saved = SavedResolutions.load(resolutionLibrary());
+                    saved.add(value);
+                    SavedResolutions.save(resolutionLibrary(), saved);
+                    appendPreferenceEntry(preference, value, value);
+                }
+                selectResolution(preference, value);
+                dialog.dismiss();
+            }));
+            dialog.show();
+        }
+
+        private void deleteResolution(ListPreference preference) {
+            Set<String> saved = SavedResolutions.load(resolutionLibrary());
+            String[] values = saved.toArray(new String[0]);
+            Arrays.sort(values);
+            if (values.length == 0) {
+                Toast.makeText(requireContext(), R.string.resolution_none, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            new androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                    .setTitle(R.string.resolution_delete)
+                    .setItems(values, (dialog, which) -> {
+                        String value = values[which];
+                        saved.remove(value);
+                        SavedResolutions.save(resolutionLibrary(), saved);
+                        if (value.equals(preference.getValue())) {
+                            selectResolution(preference, PreferenceConfiguration.DEFAULT_RESOLUTION);
+                        }
+                        removeValue(PreferenceConfiguration.RESOLUTION_PREF_STRING, value, () -> {});
+                    })
+                    .setNegativeButton(android.R.string.cancel, null).show();
+        }
+
         @Override
         public void onDisplayPreferenceDialog(@NonNull Preference preference) {
-            if (preference instanceof ConfirmDeleteOscPreference) {
+            if (PreferenceConfiguration.RESOLUTION_PREF_STRING.equals(preference.getKey())) {
+                showResolutionDialog((ListPreference) preference);
+            } else if (preference instanceof ConfirmDeleteOscPreference) {
                 DialogFragment dialogFragment = ConfirmDeleteOscPreference.DialogFragmentCompat.newInstance(preference.getKey());
                 dialogFragment.setTargetFragment(this, 0);
                 dialogFragment.show(getFragmentManager(), null);
