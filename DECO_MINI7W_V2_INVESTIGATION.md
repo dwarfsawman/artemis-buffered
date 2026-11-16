@@ -261,3 +261,67 @@ ArtemisからPCへの再接続後、ユーザーがクリックの復帰とDeco�
 今回、アプリコード、APK、PCのマウス操作ソフト設定は変更していない。再接続によって解消したセッション内の入力状態の不整合が候補だが、Apollo/Windows/クライアントのどの処理が原因かは未確定。Decoの接続やアクセシビリティが有効であることだけを原因とは断定できない。恒久修正が完了したとは扱わない。
 
 採取した読み取り用フックとログ監視は終了済み。資料は `%TEMP%/artemis-deco-investigation/` の `totem-mouse-kernel-events.txt`、`totem-apollo-mouse-buttons.txt`、`totem-windows-mouse-events.txt`、`totem-windows-mouse-events-v2.txt`、`totem-windows-mouse-events-v3.txt`、`totem-apollo-mouse-and-pen-v3.txt`、`input-totem-restored.txt`。
+
+## Decoと別マウスによる画面間移動（2026-11-16）
+
+Xiaomi Pad 8のArtemisとLegion TabのArtemisを同時接続しているとき、Xiaomi側のマウスをホストの隣の画面へ移動できない問題に対応した。
+
+### 実装
+
+- Decoを保護するPointer Capture抑制は維持する。抑制中も、別のマウスのSOURCE_MOUSE / TOOL_TYPE_MOUSEイベントはAXIS_RELATIVE_X/Y（履歴を含む）でホストへ送る。画面端で制限されるAndroidの絶対座標を使わない。移動量ゼロのクリック・スクロールでも相対経路を維持し、ホストカーソルが絶対位置へ戻るのを防ぐ。
+- Decoの絶対座標マウスとペンはこの変換から除外する。`C:/Users/raven/work/keyboardWorks/xppen-deco-mini7w-v2` の現行READMEと`payload/src/main.rs`を確認し、Bluetooth改造ファームウェアの「ホバー・サイドボタン時は絶対座標マウス、接地時はペン」という出力を維持した。ファームウェア側の変更は行っていない。
+- ストリーミング中のDeco接続では、Pointer CaptureによりペンがKEYBOARDだけのsourcesへ変化していた（実機Device 45、Touch Input Mapper DISABLED）。SOURCEだけの判定では認識できないため、Deco mini7W V2のVID/PID `28bd:0949`でも判定する。Capture抑制とアクセシビリティ転送の両方に適用し、接続順による再捕捉を防ぐ。
+- `log.tag.ArtemisMouse=DEBUG`の場合だけ、250ms間隔で入力元・相対経路・capture状態・移動量の診断ログを出す。
+
+### 検証
+
+- 関連15件成功（ExternalStylusSupport 6、KeyboardAccessibilityService 4、AndroidNativePointerCaptureProvider 5）。新規3件で、Capture中の後付け接続、画面端の移動量と履歴、移動量ゼロ、Decoのホバー・ペン・消しゴムの除外、カーソル表示時の解除を確認した。
+- 全体114件中109件成功、5件失敗。失敗はRELEASE.md記載の既知のLayoutInflationTest、SimpleStartupTest、StartupTest、ProfilesNavigationTestの2件と一致。
+- `assembleNonRoot_gameRelease`成功。署名検証成功。Xiaomi Pad 8へ`adb install -r`で上書きした。
+- 再接続後の実機はGameにフォーカスがある状態でPointer Capture Disabled。Deco PenはMOUSE | STYLUSのPOINTERモードへ復帰している。
+- 実入力ログで、Deco Pen（Device 45、source=6002、tool=2）はrelative=false、別マウス（TOTEM、Device 39、source=2002、tool=3）はrelative=true / capture=falseで非ゼロのdx/dyを取得できた。
+- 検証中のホストの有効画面は`\\.\DISPLAY26`の1枚だけだった（Windows Formsの論理座標1439×960）。マウスカーソルのX=0〜1438への移動は記録できたが、隣の画面が無いため画面間移動の実測確認はまだできていない。Legion Tabも再接続した状態でのユーザー確認を依頼した。クリック・描画のユーザー評価も確認中。
+
+テストAPKは公開版と区別して`dist/artemis-buffered-20.2.6-buffered.23-deco-mouse-test-arm64-v8a.apk`へ配置した。バージョンは20.2.6-buffered.23 / 5823のまま。SHA-256は`DCB39D5A41B7F05BC91724560FCCC84D558FE89D291FFD7E97E72F379EC24F09`。GitHub Releaseは作成していない。ホストの画面構成・端末別表示設定・Legion Tabには変更を加えていない。
+
+ログは`%TEMP%/artemis-deco-mouse-build-tests.log`、`artemis-deco-mouse-assemble.log`、`artemis-deco-mouse-device.log`、`artemis-pad-input-before.txt`、`artemis-pad-input-deco.txt`、`artemis-pad-input-after.txt`に保存した。
+
+### v2: 縮尺・マウス速度・Android側カーソル（同日）
+
+v1へのユーザー報告で、ペン領域の端が画面の半分程度にしか届かない、別マウスが速すぎる、AndroidとWindowsのカーソルが両方表示される問題が判明した。
+
+- ユーザーがDecoの四隅・外周を接地した状態でなぞり、`getevent -lt /dev/input/event23`でABS_X=0〜17797、ABS_Y=20〜11109を測定した。BluetoothのHID記述は両軸とも最大32767で、実際のreport-7の範囲（firmwareの0x4585 / 0x2b65）と一致していない。Androidは両軸のMotionRangeを0〜3199.902としていた。
+- 未変換のアクセシビリティイベントのペン座標を実際の入力範囲で正規化し、操作領域全体を配信画面全体へ対応させた。横・縦をそれぞれ正規化するため、縦横比が異なる画面にも全域が対応する。USBで正しく非正方形のMotionRangeを持つ場合はBluetooth固有の倍率を適用しない。画面一体型ペンと通常マウスは対象外。
+- アクセシビリティの対象をSOURCE_MOUSEからSOURCE_STYLUSへ変更した。通常マウスをViewRootImplの通常経路へ戻し、カーソルアイコン更新を可能にする。ストリームのSurfaceViewに加えて背景のroot viewにもTYPE_NULLを設定する。
+- 捕捉なしの通常マウスに含まれるAndroidの基礎感度倍率を補正した。この端末のpointer_speed=7ではAndroid 15以降の低速倍率は4.0832で、実測ログの8.166...ピクセルは補正後2カウントとなる。端数のfloat誤差で2が1に切り捨てられないよう丸める。システムのpointer_speedは読み取りのみ。Pointer Capture中の入力には適用しない。高速移動時のAndroid側の可変加速まで完全に逆変換する処理ではない。
+- AOSP参照: [CursorInputMapper](https://android.googlesource.com/platform/frameworks/native/+/c497a09eb5d2eea5999915a7163e6e44d5185dfd/services/inputflinger/reader/mapper/CursorInputMapper.cpp)、[AccelerationCurve](https://android.googlesource.com/platform/frameworks/native.git/+/refs/heads/main/libs/input/AccelerationCurve.cpp)。
+
+関連17件すべて成功。全体116件中111件成功で、失敗5件は既知のものと一致した。`--continue`で既知のテスト失敗後もAPK作成まで完了し、assembleNonRoot_gameReleaseの完了とAPK署名検証を確認した。
+
+`dist/artemis-buffered-20.2.6-buffered.23-deco-mouse-v2-test-arm64-v8a.apk`をXiaomi Pad 8へ上書きした。SHA-256: `95D16E27F89E3E7826DE6226228BF6F3F2AE38A6ED658C9AE06B564A81F0CFA2`。v1 APKも識別可能な別ファイルとして残してある。ユーザーは通常マウスの速度・二重カーソルと、実際の描画・タップの全画面対応を確認した。残っている制限は、浮かせたペンのAndroid側カーソルが元の狭い範囲に出ること。
+
+資料: `%TEMP%/artemis-deco-corners-kernel.txt`、`artemis-deco-kernel-capabilities.txt`、`artemis-pad-input-speed.txt`、`artemis-deco-mouse-v2-targeted.log`、`artemis-deco-mouse-v2-build-tests.log`、`artemis-deco-mouse-v2-signature.log`。
+
+### v3: ペン専用カーソル非表示の試作（不採用、同日）
+
+v2について、ユーザーは通常マウスの速度と二重カーソルの改善を確認した。その後の切り分けで、実際の描画・タップ位置は全画面に対応し、狭い範囲に残っていたのは浮かせたペンのAndroid側カーソルだけと確認できた。v2の実機ログでも送信する正規化座標のX/Yはそれぞれ1.0まで到達している。描画縮尺が未修正という途中の解釈は訂正する。
+
+AndroidのMousePointerControllersはTYPE_NULLになったが、DrawingTabletControllers（Device 45）はTYPE_NOT_SPECIFIED / TYPE_ARROWのままだった。ペンの傾き回復用アクセシビリティ転送がペン入力を消費していたため、ViewRootImplによるペン用カーソル更新が実行されていなかった。
+
+- Android 15/16のmotion observingを使い、未変換のペン情報を取得しながらViewRootImplにもイベントを届ける。通常の画面経路はカーソル更新のために通し、Gameでそのコピーによる描画・クリック・UI操作の重複を抑止する。PCへの転送は未変換のアクセシビリティイベントだけを使う。
+- 元のイベントを保持したまま、アプリ内UIへ渡すコピーの位置も全画面に合わせる。Focus Penなどの画面一体型ペンはobserving時の通常経路を使う。
+- この端末は`android.view.accessibility.motion_event_observing=true`だが、SDK公開メソッドとその反射呼び出しは利用不可だった。AccessibilityServiceInfoのAOSP形式の末尾2整数（対象source、observed source）を検証してParcelableコピーを作る互換処理を追加した。Android 35/36だけを対象とし、全体の再シリアライズが変更予定バイト列と完全一致した場合だけ採用する。異なるOEM形式や非対応OSではv2の転送方式へ戻す。追加権限・Shizuku・全端末のhidden API設定変更は使っていない。
+- 実機の独立したdebugビルドでsources=16386 / observed=16386の保持を確認した。調査用debugアプリとreceiverソースは削除済みで、release APKには含めていない。
+- 関連21件成功。全体120件中115件成功、失敗は既知の5件のみ。assembleと署名検証も完了した。
+
+試作APK（SHA-256: `116BF2D57DBAF5665D04F03AD92FA50FDAD2858A51DE726398C939B52E675363`）をXiaomi Pad 8へ上書きしたが、ユーザーからペン用カーソルは残ると報告された。次に別のdebugアプリからAccessibilityManager.getEnabledAccessibilityServiceList()で**システム側のサービス設定**を取得すると、sources=16386に対してobserved=0だった。アプリ内のParcelableで値が保持されても、OS側へ適用されていなかった。DeviceConfig表示だけでは機能の利用可否を判定できない。
+
+このため、observing互換処理・ネイティブ側コピーの抑止・関連する試作テストは撤去した。調査用debugアプリもアンインストールし、動作確認済みのv2 APKへ戻した。試作APKはdistから削除した。ペンを浮かせた際のAndroidカーソル非表示は未解決であり、完全対応済みとは扱わない。通常マウスの改善と描画座標の補正は維持している。端末全体のhidden API設定や機能フラグは変更していない。ArtemisMouse/ArtemisDecoの診断ログは終了した。
+
+資料: `%TEMP%/artemis-pointer-compat-probe.log`、`artemis-pointer-compat-server-probe.log`、`artemis-pad-hover-before.txt`、`artemis-deco-mouse-v3-targeted.log`、`artemis-deco-mouse-v3-build-tests.log`、`artemis-deco-mouse-v3-signature.log`、`artemis-deco-mouse-final-targeted.log`。
+
+### Shizukuでペン入力を直接取得する方式（2026-11-16）
+
+Xiaomi側のペンカーソルを消すため、ShizukuのshellプロセスでDecoのペン用ノードとホバー用絶対マウスノードだけをEVIOCGRABし、ホストへ直接転送する実装を追加した。ユーザーがカーソル非表示と描画の動作を確認した。通常マウス・物理キーボード・Decoの相対マウス用ノードは占有しない。
+
+設計上の根拠、ノード判定、座標・傾き計算、ライフサイクル、Shizuku運用、実機検証、Deco相対モードの画面間移動については[DECO_SHIZUKU_INPUT.md](DECO_SHIZUKU_INPUT.md)に記載する。

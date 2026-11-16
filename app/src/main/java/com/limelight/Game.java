@@ -17,6 +17,8 @@ import com.limelight.binding.input.GameInputDevice;
 import com.limelight.binding.input.KeyboardTranslator;
 import com.limelight.binding.input.capture.InputCaptureManager;
 import com.limelight.binding.input.capture.InputCaptureProvider;
+import com.limelight.binding.input.capture.DecoEvdevStream;
+import com.limelight.binding.input.capture.ShizukuDecoCapture;
 import com.limelight.binding.input.touch.AbsoluteTouchContext;
 import com.limelight.binding.input.touch.RelativeTouchContext;
 import com.limelight.binding.input.driver.UsbDriverService;
@@ -201,6 +203,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private int modifierFlags = 0;
     private boolean grabbedInput = true;
     private boolean cursorVisible = false;
+    private ShizukuDecoCapture decoCapture;
+    private int decoMouseButtons;
+    private boolean decoFallbackTip;
     private boolean isPanZoomMode = false;
     private boolean synthClickPending = false;
     private boolean pointerSwiping = false;
@@ -518,6 +523,32 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         performanceOverlayBig = findViewById(R.id.performanceOverlayBig);
 
         inputCaptureProvider = InputCaptureManager.getInputCaptureProvider(this, this);
+        decoCapture = new ShizukuDecoCapture(this,
+                () -> grabbedInput && !cursorVisible && canReceiveAccessibilityPointerEvents()
+                        && (gameMenuCallbacks == null || !gameMenuCallbacks.isMenuOpen()),
+                new DecoEvdevStream.Sink() {
+                    @Override public void pen(byte event, byte tool, byte buttons, float x, float y,
+                                              float pressure, short rotation, byte tilt) {
+                        if (conn == null) return;
+                        noteStreamUserInput();
+                        int result = conn.sendPenEvent(event, tool, buttons, x, y, pressure,
+                                0, 0, rotation, tilt);
+                        if (result == MoonBridge.LI_ERR_UNSUPPORTED) {
+                            if (event == MoonBridge.LI_TOUCH_EVENT_DOWN) decoFallbackTip = true;
+                            if (event == MoonBridge.LI_TOUCH_EVENT_UP || event == MoonBridge.LI_TOUCH_EVENT_CANCEL
+                                    || event == MoonBridge.LI_TOUCH_EVENT_HOVER_LEAVE) decoFallbackTip = false;
+                            sendDecoMouse(x, y, decoFallbackTip ? 1 : 0,
+                                    event != MoonBridge.LI_TOUCH_EVENT_CANCEL && event != MoonBridge.LI_TOUCH_EVENT_HOVER_LEAVE);
+                        }
+                    }
+                    @Override public void mouse(float x, float y, int buttons) {
+                        sendDecoMouse(x, y, buttons, true);
+                    }
+                    @Override public void scroll(int wheel) {
+                        if (conn != null) conn.sendMouseScroll((byte)Math.max(-127, Math.min(127, wheel)));
+                        noteStreamUserInput();
+                    }
+                });
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             streamView.setOnCapturedPointerListener(new View.OnCapturedPointerListener() {
@@ -1310,6 +1341,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // With Android native pointer capture, capture is lost when focus is lost,
         // so it must be requested again when focus is regained.
         inputCaptureProvider.onWindowFocusChanged(hasFocus);
+        if (decoCapture != null) decoCapture.refresh();
         KeyboardAccessibilityService.refreshPointerInput();
     }
 
@@ -1601,6 +1633,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     protected void onDestroy() {
+        if (decoCapture != null) decoCapture.close();
         if (audioRenderer != null) {
             audioRenderer.shutdownNow();
         }
@@ -1649,6 +1682,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     @Override
     protected void onPause() {
         activityResumed = false;
+        if (decoCapture != null) decoCapture.refresh();
         KeyboardAccessibilityService.refreshPointerInput();
         if (isFinishing()) {
             // Stop any further input device notifications before we lose focus (and pointer capture)
@@ -1667,6 +1701,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     protected void onResume() {
         super.onResume();
         activityResumed = true;
+        if (decoCapture != null) decoCapture.refresh();
         KeyboardAccessibilityService.refreshPointerInput();
     }
 
@@ -1831,6 +1866,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         setMetaKeyCaptureState(grab);
 
         grabbedInput = grab;
+        if (decoCapture != null) decoCapture.refresh();
     }
 
     private final Runnable toggleGrab = new Runnable() {
@@ -2454,6 +2490,15 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
 
     private float[] getStreamViewRelativeNormalizedXY(View view, MotionEvent event, int pointerIndex) {
+        if (earlyAccessibilityPointerEvent != null
+                && earlyAccessibilityPointerEvent.getDeviceId() == event.getDeviceId()) {
+            int earlyIndex = earlyAccessibilityPointerEvent.findPointerIndex(event.getPointerId(pointerIndex));
+            if (earlyIndex >= 0) {
+                PointF tabletPosition = ExternalStylusSupport.getNormalizedTabletPosition(
+                        earlyAccessibilityPointerEvent, earlyIndex);
+                if (tabletPosition != null) return new float[] {tabletPosition.x, tabletPosition.y};
+            }
+        }
         float normalizedX = event.getX(pointerIndex);
         float normalizedY = event.getY(pointerIndex);
         //开启自定义修改触控灵敏度 并且 数值不为100
@@ -2601,6 +2646,22 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         return new float[] { cartesianToR(contactAreaMajorCartesian), cartesianToR(contactAreaMinorCartesian) };
     }
 
+    private void sendDecoMouse(float x, float y, int buttons, boolean move) {
+        if (conn == null) return;
+        noteStreamUserInput();
+        if (move) conn.sendMousePosition((short)Math.round(x * 32767), (short)Math.round(y * 32767),
+                (short)32767, (short)32767);
+        byte[] mappedButtons = {MouseButtonPacket.BUTTON_LEFT, MouseButtonPacket.BUTTON_RIGHT, MouseButtonPacket.BUTTON_MIDDLE};
+        for (int i = 0; i < mappedButtons.length; i++) {
+            int bit = 1 << i;
+            if (((decoMouseButtons ^ buttons) & bit) != 0) {
+                if ((buttons & bit) != 0) conn.sendMouseButtonDown(mappedButtons[i]);
+                else conn.sendMouseButtonUp(mappedButtons[i]);
+            }
+        }
+        decoMouseButtons = buttons;
+    }
+
     private boolean sendPenEventForPointer(View view, MotionEvent event, byte eventType, byte toolType, int pointerIndex) {
         byte penButtons = 0;
         if ((event.getButtonState() & MotionEvent.BUTTON_STYLUS_PRIMARY) != 0) {
@@ -2722,6 +2783,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     // Returns true if the event was consumed
     // NB: View is only present if called from a view callback
     public boolean handleMotionEvent(View view, MotionEvent event) {
+        // Discard Android events queued before the evdev grab. Keys use a separate path.
+        if (decoCapture != null && decoCapture.isActive() && event.getDevice() != null
+                && event.getDevice().getVendorId() == 0x28bd && event.getDevice().getProductId() == 0x0949
+                && event.getDevice().getName().equals("Deco mini7W V2 Pen")) return true;
         if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
             // External-display control touches bypass this Activity's dispatchTouchEvent().
             noteStreamUserInput();
@@ -3440,6 +3505,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     private void stopConnection() {
         cancelStreamInactivityTimeout();
+        if (decoCapture != null) decoCapture.close();
         if (connecting || connected) {
             connecting = connected = false;
             KeyboardAccessibilityService.refreshPointerInput();

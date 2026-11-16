@@ -4,6 +4,11 @@
 # Our code
 -keep class com.limelight.binding.input.evdev.* {*;}
 
+# Shizuku 13 shell entry point is invoked reflectively by both immersive and pen capture.
+-keepclassmembers class rikka.shizuku.Shizuku {
+    static *** newProcess(java.lang.String[], java.lang.String[], java.lang.String);
+}
+
 # KeyMapper - keep all VK_* fields for reflection
 -keep class com.limelight.utils.KeyMapper {*;}
 

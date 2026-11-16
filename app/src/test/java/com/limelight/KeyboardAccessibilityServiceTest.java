@@ -52,9 +52,10 @@ public class KeyboardAccessibilityServiceTest {
             devices.when(InputDevice::getDeviceIds).thenReturn(new int[]{34});
             devices.when(() -> InputDevice.getDevice(34)).thenReturn(tablet);
             connect();
-            assertEquals(InputDevice.SOURCE_MOUSE, appliedInfo.getMotionEventSources());
+            assertEquals(InputDevice.SOURCE_STYLUS, appliedInfo.getMotionEventSources());
             assertTrue((appliedInfo.flags & AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS) != 0);
             MotionEvent event = mock(MotionEvent.class);
+            when(event.getDevice()).thenReturn(tablet);
             service.onMotionEvent(event);
             verify(game).dispatchAccessibilityPointerEvent(event);
 
@@ -80,7 +81,7 @@ public class KeyboardAccessibilityServiceTest {
             assertEquals(0, appliedInfo.getMotionEventSources());
             devices.when(() -> InputDevice.getDevice(1)).thenReturn(tablet);
             service.onInputDeviceChanged(1);
-            assertEquals(InputDevice.SOURCE_MOUSE, appliedInfo.getMotionEventSources());
+            assertEquals(InputDevice.SOURCE_STYLUS, appliedInfo.getMotionEventSources());
             devices.when(InputDevice::getDeviceIds).thenReturn(new int[0]);
             service.onInputDeviceRemoved(1);
             assertEquals(0, appliedInfo.getMotionEventSources());
@@ -98,5 +99,24 @@ public class KeyboardAccessibilityServiceTest {
         assertTrue(service.onKeyEvent(up));
         verify(game).handleKeyDown(down);
         verify(game).handleKeyUp(up);
+    }
+
+    @Test public void decoIdentityEnablesRoutingWhileCaptureHasHiddenItsStylusSources() {
+        Game game = mock(Game.class);
+        Game.instance = game;
+        when(game.canReceiveAccessibilityPointerEvents()).thenReturn(true);
+        InputDevice tablet = device(InputDevice.SOURCE_KEYBOARD);
+        when(tablet.getVendorId()).thenReturn(0x28bd);
+        when(tablet.getProductId()).thenReturn(0x0949);
+        try (MockedStatic<InputDevice> devices = mockStatic(InputDevice.class)) {
+            devices.when(InputDevice::getDeviceIds).thenReturn(new int[]{45});
+            devices.when(() -> InputDevice.getDevice(45)).thenReturn(tablet);
+            connect();
+            assertEquals(InputDevice.SOURCE_STYLUS, appliedInfo.getMotionEventSources());
+            MotionEvent event = mock(MotionEvent.class);
+            when(event.getDevice()).thenReturn(tablet);
+            service.onMotionEvent(event);
+            verify(game).dispatchAccessibilityPointerEvent(event);
+        }
     }
 }

@@ -5,6 +5,9 @@ import android.app.Activity;
 import android.hardware.input.InputManager;
 import android.os.Build;
 import android.os.Handler;
+import android.os.SystemClock;
+import android.provider.Settings;
+import android.util.Log;
 import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.View;
@@ -19,6 +22,9 @@ import com.limelight.binding.input.ExternalStylusSupport;
 public class AndroidNativePointerCaptureProvider extends AndroidPointerIconCaptureProvider implements InputManager.InputDeviceListener {
     private final InputManager inputManager;
     private final View targetView;
+    private boolean drawingTabletPresent;
+    private long lastMouseDiagnosticTime;
+    private float uncapturedMouseGain = 1f;
 
     public AndroidNativePointerCaptureProvider(Activity activity, View targetView) {
         super(activity, targetView);
@@ -36,6 +42,7 @@ public class AndroidNativePointerCaptureProvider extends AndroidPointerIconCaptu
     // https://github.com/moonlight-stream/moonlight-android/issues/1030
     private boolean hasCaptureCompatibleInputDevice() {
         boolean compatibleDevicePresent = false;
+        drawingTabletPresent = false;
         for (int id : InputDevice.getDeviceIds()) {
             InputDevice device = InputDevice.getDevice(id);
             if (device == null) {
@@ -45,8 +52,9 @@ public class AndroidNativePointerCaptureProvider extends AndroidPointerIconCaptu
             // Capture disables Android's POINTER TouchInputMapper, including external
             // pens such as the Deco. Even another connected mouse can trigger this,
             // so a drawing tablet vetoes capture for the entire device list.
-            if (ExternalStylusSupport.isDrawingTablet(device.getSources())) {
-                return false;
+            if (ExternalStylusSupport.isDrawingTablet(device)) {
+                drawingTabletPresent = true;
+                continue;
             }
 
             // Skip touchscreens when considering compatible capture devices.
@@ -68,10 +76,21 @@ public class AndroidNativePointerCaptureProvider extends AndroidPointerIconCaptu
             }
         }
 
-        return compatibleDevicePresent;
+        return compatibleDevicePresent && !drawingTabletPresent;
     }
 
     private void updatePointerCapture() {
+        // Read, but never change, the system's mouse speed. Unlike capture,
+        // SOURCE_MOUSE deltas already contain Android's pointer sensitivity.
+        int speed = Settings.System.getInt(targetView.getContext().getContentResolver(), "pointer_speed", 0);
+        if (Build.VERSION.SDK_INT >= 35) {
+            // AOSP AccelerationCurve.cpp: low-speed gain = 3.19 * 0.64 * sensitivity / 10.
+            // In particular, speed 7 turns two HID counts into ~8.166 screen pixels.
+            int[] sensitivity = {1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20};
+            uncapturedMouseGain = 3.19f * 0.64f * sensitivity[Math.max(0, Math.min(14, speed + 7))] / 10f;
+        } else {
+            uncapturedMouseGain = (float) Math.pow(2, speed / 4.0);
+        }
         boolean shouldCapture = isCapturing && !isCursorVisible
                 && targetView.hasWindowFocus() && hasCaptureCompatibleInputDevice();
         if (shouldCapture && !targetView.hasPointerCapture()) {
@@ -130,9 +149,38 @@ public class AndroidNativePointerCaptureProvider extends AndroidPointerIconCaptu
         // SOURCE_MOUSE_RELATIVE is how SOURCE_MOUSE appears when our view has pointer capture.
         // SOURCE_TOUCHPAD will have relative axes populated iff our view has pointer capture.
         // See https://developer.android.com/reference/android/view/View#requestPointerCapture()
+        // CursorInputMapper supplies AXIS_RELATIVE_X/Y even without capture.
+        // Use those for the independent mouse, including zero-delta clicks/scrolls,
+        // so Android's cursor hitting the display edge cannot pin the host cursor.
+        // The tablet's absolute mouse reports (modified firmware's hovering pen)
+        // must still follow the absolute path, just like its stylus reports.
         int eventSource = event.getSource();
-        return (eventSource == InputDevice.SOURCE_MOUSE_RELATIVE && event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE) ||
-                (eventSource == InputDevice.SOURCE_TOUCHPAD && targetView.hasPointerCapture());
+        boolean relative = (eventSource == InputDevice.SOURCE_MOUSE_RELATIVE && event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE) ||
+                (eventSource == InputDevice.SOURCE_TOUCHPAD && targetView.hasPointerCapture()) ||
+                isUncapturedMouseEvent(event);
+        if (drawingTabletPresent && Log.isLoggable("ArtemisMouse", Log.DEBUG)
+                && SystemClock.uptimeMillis() - lastMouseDiagnosticTime >= 250) {
+            lastMouseDiagnosticTime = SystemClock.uptimeMillis();
+            Log.d("ArtemisMouse", "device=" + event.getDeviceId()
+                    + " source=" + Integer.toHexString(eventSource)
+                    + " tool=" + event.getToolType(0) + " relative=" + relative
+                    + " capture=" + targetView.hasPointerCapture()
+                    + " x=" + event.getX() + " y=" + event.getY()
+                    + " gain=" + uncapturedMouseGain
+                    + " rawDx=" + event.getAxisValue(MotionEvent.AXIS_RELATIVE_X)
+                    + " rawDy=" + event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)
+                    + " dx=" + getRelativeAxisX(event) + " dy=" + getRelativeAxisY(event));
+        }
+        return relative;
+    }
+
+    private boolean isUncapturedMouseEvent(MotionEvent event) {
+        return drawingTabletPresent && isCapturing && !isCursorVisible
+                && event.getSource() == InputDevice.SOURCE_MOUSE
+                && event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE
+                && event.getDevice() != null
+                && (!ExternalStylusSupport.isDrawingTablet(event.getDevice())
+                    || ExternalStylusSupport.isDecoRelativeMouse(event.getDevice()));
     }
 
     @Override
@@ -143,7 +191,8 @@ public class AndroidNativePointerCaptureProvider extends AndroidPointerIconCaptu
         for (int i = 0; i < event.getHistorySize(); i++) {
             x += event.getHistoricalAxisValue(axis, pointerIndex, i);
         }
-        return x;
+        // Round to HID counts, avoiding float quantization turning 1.9999 into 1.
+        return isUncapturedMouseEvent(event) ? Math.round(x / uncapturedMouseGain) : x;
     }
 
     @Override
@@ -154,7 +203,7 @@ public class AndroidNativePointerCaptureProvider extends AndroidPointerIconCaptu
         for (int i = 0; i < event.getHistorySize(); i++) {
             y += event.getHistoricalAxisValue(axis, pointerIndex, i);
         }
-        return y;
+        return isUncapturedMouseEvent(event) ? Math.round(y / uncapturedMouseGain) : y;
     }
 
     @Override

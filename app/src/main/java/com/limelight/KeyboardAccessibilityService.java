@@ -35,16 +35,16 @@ public class KeyboardAccessibilityService extends AccessibilityService
         if (game != null && game.canReceiveAccessibilityPointerEvents()) {
             for (int id : InputDevice.getDeviceIds()) {
                 InputDevice device = InputDevice.getDevice(id);
-                if (device != null && ExternalStylusSupport.isDrawingTablet(device.getSources())) {
+                if (ExternalStylusSupport.isDrawingTablet(device)) {
                     tabletPresent = true;
                     break;
                 }
             }
         }
-        // This API intercepts a source, not a device. Route all matching mouse
-        // events through the foreground Game's normal UI dispatch while a tablet
-        // is attached. Screen pens do not match SOURCE_MOUSE and retain their path.
-        int requestedSources = tabletPresent ? InputDevice.SOURCE_MOUSE : 0;
+        // External pens carry both MOUSE and STYLUS. Intercept STYLUS only:
+        // ordinary mice must reach ViewRootImpl so Android updates their hidden
+        // pointer icon instead of leaving a second, system cursor on screen.
+        int requestedSources = tabletPresent ? InputDevice.SOURCE_STYLUS : 0;
         if (pointerSources != requestedSources) {
             currentInfo.setMotionEventSources(requestedSources);
             setServiceInfo(currentInfo);

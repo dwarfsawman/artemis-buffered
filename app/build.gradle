@@ -11,8 +11,8 @@ android {
         minSdk 21
         targetSdk 34
 
-        versionName "20.2.6-buffered.23"
-        versionCode = 5823
+        versionName "20.2.6-buffered.24"
+        versionCode = 5824
 
         // Generate native debug symbols to allow Google Play to symbolicate our native crashes
         ndk.debugSymbolLevel = 'FULL'
@@ -88,6 +88,7 @@ android {
     }
 
     packaging {
+        jniLibs.useLegacyPackaging = true // Shizuku executes installed libdeco_reader.so.
         resources {
             pickFirsts.add('META-INF/versions/9/OSGI-INF/MANIFEST.MF')
         }

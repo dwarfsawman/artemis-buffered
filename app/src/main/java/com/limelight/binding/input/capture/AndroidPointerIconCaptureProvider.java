@@ -25,11 +25,14 @@ public class AndroidPointerIconCaptureProvider extends InputCaptureProvider {
     public void hideCursor() {
         super.hideCursor();
         targetView.setPointerIcon(PointerIcon.getSystemIcon(context, PointerIcon.TYPE_NULL));
+        // Cover the stream's letterbox/background as well as the SurfaceView.
+        targetView.getRootView().setPointerIcon(PointerIcon.getSystemIcon(context, PointerIcon.TYPE_NULL));
     }
 
     @Override
     public void showCursor() {
         super.showCursor();
         targetView.setPointerIcon(null);
+        targetView.getRootView().setPointerIcon(null);
     }
 }

@@ -1,5 +1,6 @@
 package com.limelight.binding.input;
 
+import android.graphics.PointF;
 import android.os.Build;
 import android.os.SystemClock;
 import android.util.Log;
@@ -11,6 +12,61 @@ import android.view.Surface;
 public final class ExternalStylusSupport {
     private static long lastDiagnosticTime;
     private ExternalStylusSupport() {}
+
+    public static boolean isDrawingTablet(InputDevice device) {
+        if (device == null) return false;
+        // Capture removes MOUSE/STYLUS from the Deco's disabled TouchInputMapper.
+        // Its HID identity survives, including when it connects during capture.
+        return isDrawingTablet(device.getSources())
+                || isDecoMini7w(device);
+    }
+
+    private static boolean isDecoMini7w(InputDevice device) {
+        return device != null && device.getVendorId() == 0x28bd && device.getProductId() == 0x0949;
+    }
+
+    /** Android merges report-9's rotary node with the separate REL_X/Y mouse node.
+     * Its SOURCE_MOUSE events come from CursorInputMapper, not the pen mapper. */
+    public static boolean isDecoRelativeMouse(InputDevice device) {
+        if (!isDecoMini7w(device)) return false;
+        String name = device.getName();
+        int sources = device.getSources();
+        return ("Deco mini7W V2".equals(name) || "Deco mini7W V2 Mouse".equals(name))
+                && (sources & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE
+                && (sources & InputDevice.SOURCE_STYLUS) != InputDevice.SOURCE_STYLUS;
+    }
+
+    /** Full tablet area -> full stream, using the untouched accessibility event. */
+    public static PointF getNormalizedTabletPosition(MotionEvent event, int pointerIndex) {
+        InputDevice device = event.getDevice();
+        if (!isDecoMini7w(device) || !isDrawingTablet(device.getSources())
+                || (event.getToolType(pointerIndex) != MotionEvent.TOOL_TYPE_STYLUS
+                    && event.getToolType(pointerIndex) != MotionEvent.TOOL_TYPE_ERASER)) {
+            return null;
+        }
+        InputDevice.MotionRange x = device.getMotionRange(MotionEvent.AXIS_X, event.getSource());
+        InputDevice.MotionRange y = device.getMotionRange(MotionEvent.AXIS_Y, event.getSource());
+        if (x == null || y == null || x.getRange() <= 0 || y.getRange() <= 0) return null;
+        float normalizedX = (event.getX(pointerIndex) - x.getMin()) / x.getRange();
+        float normalizedY = (event.getY(pointerIndex) - y.getMin()) / y.getRange();
+        // Bluetooth's pen descriptor advertises 32767 on both axes, but the
+        // firmware sends report-7 coordinates capped at 0x4585 / 0x2b65.
+        // Android scales both axes equally from that square descriptor. USB's
+        // correct, unequal ranges must not receive the Bluetooth correction.
+        if (Math.abs(x.getRange() - y.getRange()) < 1f) {
+            normalizedX *= 32767f / 0x4585;
+            normalizedY *= 32767f / 0x2b65;
+        }
+        PointF normalized = new PointF(Math.max(0f, Math.min(1f, normalizedX)),
+                Math.max(0f, Math.min(1f, normalizedY)));
+        if (Log.isLoggable("ArtemisDeco", Log.DEBUG)
+                && SystemClock.uptimeMillis() - lastDiagnosticTime >= 250) {
+            lastDiagnosticTime = SystemClock.uptimeMillis();
+            Log.d("ArtemisDeco", "tablet position=" + normalized.x + "," + normalized.y
+                    + " pressure=" + event.getPressure(pointerIndex));
+        }
+        return normalized;
+    }
 
     public static boolean isDrawingTablet(int sources) {
         return (sources & InputDevice.SOURCE_STYLUS) == InputDevice.SOURCE_STYLUS
